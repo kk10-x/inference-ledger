@@ -34,7 +34,7 @@ from inference_ledger import topics
 from inference_ledger.bus import EventBus, KafkaBus
 from inference_ledger.config import Settings
 from inference_ledger.config import settings as default_settings
-from inference_ledger.events import RequestStarted, TerminalState
+from inference_ledger.events import ProviderUsage, RequestStarted, TerminalState
 from inference_ledger.gateway.budget import TokenBudget
 from inference_ledger.gateway.idempotency import ClaimOutcome, IdempotencyStore
 from inference_ledger.gateway.metering import StreamMeter
@@ -78,6 +78,9 @@ class GatewayState:
     client: httpx.AsyncClient
     sessions: dict[str, StreamSession] = field(default_factory=dict)
     ready: bool = True
+    # Chaos lever: drop Ledger B at the source to prove the sweeper force-settles
+    # rather than leaving requests silently unbilled. Off in normal operation.
+    suppress_provider_usage: bool = False
 
     async def settle(self, request_id: str, terminal_state: TerminalState) -> None:
         """Emit Ledger A exactly once for a request.
@@ -96,6 +99,23 @@ class GatewayState:
 
         metered = session.meter.finalize(terminal_state, ended_at=time.time())
         self.bus.publish(topics.REQUESTS_METERED, request_id, metered)
+
+        # Ledger B, only if the provider volunteered a usage block. Published on
+        # its own topic so the reconciler joins it independently; when absent,
+        # the sweeper force-settles on Ledger A alone. Suppressible for the
+        # provider-usage-blackhole chaos scenario.
+        if session.meter.has_provider_usage and not self.suppress_provider_usage:
+            self.bus.publish(
+                topics.PROVIDER_USAGE,
+                request_id,
+                ProviderUsage(
+                    request_id=request_id,
+                    prompt_tokens=session.meter.provider_prompt_tokens or 0,
+                    completion_tokens=session.meter.provider_completion_tokens or 0,
+                    reported_at=time.time(),
+                ),
+            )
+
         await self.idempotency.complete(session.tenant_id, session.idempotency_key, request_id)
 
         REQUESTS.labels(session.tenant_id, terminal_state.value).inc()
@@ -230,6 +250,12 @@ async def chat_completions(
         return JSONResponse(
             {"error": "already completed", "request_id": claim.request_id}, status_code=409
         )
+
+    # Ask the provider to append a usage block to the final chunk — this is the
+    # source of Ledger B. Without it the reconciler has only the wire count and
+    # every request force-settles. Harmless if the provider ignores the option.
+    if body.get("stream"):
+        body.setdefault("stream_options", {})["include_usage"] = True
 
     prompt_tokens = _count_prompt_tokens(body, model)
     # Admission uses the prompt plus a declared or assumed completion size. It is

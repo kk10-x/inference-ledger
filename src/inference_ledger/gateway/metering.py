@@ -51,6 +51,12 @@ class StreamMeter:
         self._buffer = ""
         self.completion_tokens = 0
         self.saw_done = False
+        # Ledger B, if the provider volunteers it. Captured into a separate field
+        # so it can never leak into the wire count above — the two must be able
+        # to disagree. None means the provider reported nothing, which is itself
+        # a signal the reconciler acts on (UNSETTLED_TIMEOUT).
+        self.provider_prompt_tokens: int | None = None
+        self.provider_completion_tokens: int | None = None
 
     def consume(self, line: str) -> None:
         """Feed one raw SSE line. Unparseable lines are ignored, never fatal.
@@ -76,11 +82,20 @@ class StreamMeter:
             if content:
                 self._buffer += content
 
-        # Some providers attach a usage block to the final chunk. That is
-        # Ledger B arriving on Ledger A's channel — deliberately not read here,
-        # or the two ledgers would stop being independent.
+        # A provider that emits a usage block (OpenAI does with
+        # stream_options.include_usage) is reporting Ledger B. Capture it into
+        # its own fields — never into completion_tokens — so the wire count and
+        # the reported count remain independently computed and free to disagree.
+        usage = chunk.get("usage")
+        if isinstance(usage, dict):
+            self.provider_prompt_tokens = usage.get("prompt_tokens")
+            self.provider_completion_tokens = usage.get("completion_tokens")
 
         self.completion_tokens = self._tokenizer(self._buffer)
+
+    @property
+    def has_provider_usage(self) -> bool:
+        return self.provider_completion_tokens is not None
 
     def finalize(self, terminal_state: TerminalState, ended_at: float) -> RequestMetered:
         """Emit Ledger A. Safe to call at any point, including mid-stream."""

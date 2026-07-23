@@ -78,6 +78,8 @@ services:
       KAFKA_BOOTSTRAP: redpanda:29092
       REDIS_URL: redis://redis:6379/0
       POSTGRES_DSN: postgresql://ledger:ledger@postgres:5432/ledger
+    expose:
+      - "9100"  # Prometheus metrics, scraped in-network; not published to host
     depends_on:
       redpanda: {condition: service_healthy}
       postgres: {condition: service_healthy}
