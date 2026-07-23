@@ -9,10 +9,11 @@ what actually crossed the wire. `inference-ledger` counts tokens off the stream 
 provider-reported usage on a separate path, joins the two in Kafka, and settles every request with
 a reason code when they disagree.
 
-> **Status:** active build. The gateway request path, attribution logic and stream metering are
-> implemented and tested (38 tests, no broker required — every dependency has an in-process fake).
-> The Kafka consumer loop and chaos runner are in progress. See [Milestones](#milestones). Nothing
-> in this README claims a result that isn't in the repo.
+> **Status:** active build. The gateway request path, the reconciler (stateful join + sweeper) and
+> the attribution logic are implemented and tested (53 tests, no broker required — every dependency
+> has an in-process fake), and the full loop has been run against a live Redpanda + Postgres
+> deployment. The chaos runner and cloud/K8s deploy are in progress. See [Milestones](#milestones).
+> Nothing in this README claims a result that isn't in the repo.
 
 ## Tech stack
 
@@ -128,7 +129,8 @@ make chaos    # failure injection; asserts drift converges and is attributed
 - [x] Attribution logic with the full drift matrix, unit-tested
 - [x] Incremental stream metering (Ledger A), unit-tested
 - [x] Gateway HTTP surface: SSE passthrough, idempotency, budgets — 38 tests, no broker required
-- [ ] Reconciler consumer loop and sweeper
+- [x] Reconciler consumer loop, stateful joiner and sweeper — full loop verified against a live
+      Redpanda + Postgres deployment (clean / drift / force-settle all land correctly)
 - [ ] Chaos runner and load generator; drift-convergence numbers in this README
 - [ ] Grafana dashboard + screenshot in `assets/`
 - [ ] Helm chart, kind setup, graceful-drain verification
