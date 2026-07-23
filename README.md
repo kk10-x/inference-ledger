@@ -108,7 +108,11 @@ curl -N http://localhost:8080/v1/chat/completions \
        "messages":[{"role":"user","content":"Explain exactly-once delivery."}]}'
 ```
 
-Grafana is at `http://localhost:3000` (anonymous admin). API docs at `http://localhost:8080/docs`.
+Grafana is at `http://localhost:3000` (anonymous read-only). API docs at `http://localhost:8080/docs`.
+
+All ports bind to `127.0.0.1`. The gateway spends real money against a provider API key, so it is
+never exposed to an untrusted network — see [docs/deployment.md](docs/deployment.md) for running
+this on a remote host.
 
 ```bash
 make test     # unit tests — attribution matrix and stream metering
