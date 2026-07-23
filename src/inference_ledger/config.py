@@ -21,5 +21,20 @@ class Settings(BaseSettings):
 
     idempotency_ttl_seconds: int = 86_400
 
+    # Per-tenant token bucket. Capacity is the burst a tenant may spend at once;
+    # refill is their sustained rate.
+    tenant_budget_tokens: int = 200_000
+    tenant_refill_tokens_per_second: float = 50.0
+
+    # Assumed completion size when a request declares no `max_tokens`. Only used
+    # for the admission guess; the mid-stream draw is what actually enforces.
+    admission_estimate_tokens: int = 512
+
+    # Must stay below the container/pod termination grace period, and the
+    # reserve must be large enough for the producer to flush. See
+    # docs/shutdown.md for the table these two have to agree with.
+    shutdown_grace_seconds: float = 40.0
+    shutdown_flush_reserve_seconds: float = 10.0
+
 
 settings = Settings()

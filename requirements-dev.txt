@@ -2,3 +2,6 @@
 pytest==8.3.4
 pytest-asyncio==0.25.0
 ruff==0.8.6
+# Lua support is required: the token bucket is a Redis script, and testing it
+# against a fake that silently skips EVAL would test nothing.
+fakeredis[lua]==2.26.2

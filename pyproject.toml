@@ -14,3 +14,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# conftest helpers are imported directly by test modules.
+pythonpath = ["src", "tests"]
