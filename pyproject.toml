@@ -14,5 +14,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-# conftest helpers are imported directly by test modules.
-pythonpath = ["src", "tests"]
+asyncio_default_fixture_loop_scope = "function"
+# "." is required for the `chaos` package: `python -m pytest` injects the cwd
+# into sys.path but a bare `pytest` does not, so omitting it passes locally and
+# fails in CI. "tests" is for conftest helpers imported directly by test modules.
+pythonpath = [".", "src", "tests"]
