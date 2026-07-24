@@ -70,7 +70,12 @@ SCENARIOS: tuple[Scenario, ...] = (
             "drift at all: streams drain, meters finalize, the producer flushes."
         ),
         inject=f"{COMPOSE} stop -t 45 gateway && {COMPOSE} up -d gateway",
-        expected_reasons=frozenset({DriftReason.GATEWAY_CRASH_PARTIAL}),
+        # A stream cancelled at the drain deadline has a Ledger A but no usage
+        # block, so it legitimately force-settles rather than being attributable
+        # to the shutdown. Both outcomes are correct; neither is a lost request.
+        expected_reasons=frozenset(
+            {DriftReason.GATEWAY_CRASH_PARTIAL, DriftReason.UNSETTLED_TIMEOUT}
+        ),
     ),
     Scenario(
         name="duplicate-delivery",
@@ -102,7 +107,10 @@ SCENARIOS: tuple[Scenario, ...] = (
             "fails — this is the silent overbilling single-ledger tools cannot see."
         ),
         inject=(f"{COMPOSE} stop provider && CHAOS_USAGE_SKEW=4 {COMPOSE} up -d provider"),
-        expected_reasons=frozenset({DriftReason.TOKENIZER_MISMATCH}),
+        # Restarting the provider kills whatever it was mid-way through serving;
+        # those requests have no usage block to join against and force-settle.
+        # The skew itself must still show up as tokenizer_mismatch.
+        expected_reasons=frozenset({DriftReason.TOKENIZER_MISMATCH, DriftReason.UNSETTLED_TIMEOUT}),
     ),
     Scenario(
         name="reconciler-rebalance",

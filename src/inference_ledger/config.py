@@ -36,5 +36,11 @@ class Settings(BaseSettings):
     shutdown_grace_seconds: float = 40.0
     shutdown_flush_reserve_seconds: float = 10.0
 
+    # Flush `requests.started` to the broker before returning the first byte.
+    # Costs one round-trip on TTFT and closes the window where a SIGKILL loses
+    # a buffered start event, leaving a request that no component knows existed.
+    # Default on: an unbillable request is worse than a slightly slower one.
+    durable_request_start: bool = True
+
 
 settings = Settings()

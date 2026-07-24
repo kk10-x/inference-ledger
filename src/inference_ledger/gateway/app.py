@@ -17,6 +17,7 @@ The shutdown sequence is the hard part and is specified in ``docs/shutdown.md``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 import uuid
@@ -56,6 +57,13 @@ TTFT = Histogram(
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
 )
 IN_FLIGHT = Gauge("gateway_streams_in_flight", "Streams currently open")
+ORPHANED_DRAINS = Counter(
+    "gateway_orphaned_drains_total", "Streams drained after the client left", ["tenant"]
+)
+
+#: Chunks buffered for a client that is not keeping up. Past this the client is
+#: treated as gone — the provider stream keeps draining regardless.
+_CLIENT_BUFFER = 256
 
 
 @dataclass
@@ -66,6 +74,9 @@ class StreamSession:
     tenant_id: str
     idempotency_key: str
     settled: bool = False
+    client_gone: bool = False
+    """Set when the client stops reading. The provider stream keeps draining."""
+    queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=_CLIENT_BUFFER))
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -77,6 +88,8 @@ class GatewayState:
     budget: TokenBudget
     client: httpx.AsyncClient
     sessions: dict[str, StreamSession] = field(default_factory=dict)
+    pumps: set[asyncio.Task] = field(default_factory=set)
+    """Live provider-stream tasks. Shutdown drains these, not the HTTP responses."""
     ready: bool = True
     # Chaos lever: drop Ledger B at the source to prove the sweeper force-settles
     # rather than leaving requests silently unbilled. Off in normal operation.
@@ -154,8 +167,16 @@ async def drain(state: GatewayState, grace_seconds: float, flush_reserve: float)
     state.ready = False
     deadline = time.monotonic() + max(0.0, grace_seconds - flush_reserve)
 
-    while state.sessions and time.monotonic() < deadline:
+    # Wait on the pumps, not the HTTP responses: a pump outlives its client and
+    # is the thing that actually settles. Includes orphaned drains still
+    # collecting Ledger B for clients that already left.
+    while state.pumps and time.monotonic() < deadline:
         await asyncio.sleep(0.1)
+
+    for pump in list(state.pumps):
+        pump.cancel()
+    if state.pumps:
+        await asyncio.gather(*state.pumps, return_exceptions=True)
 
     # Anything still open at the deadline is settled on its partial count. A
     # floor is strictly better than a gap.
@@ -285,6 +306,18 @@ async def chat_completions(
             started_at=time.time(),
         ),
     )
+    if state.settings.durable_request_start:
+        # Block until `started` is actually on the broker, before a single byte
+        # goes back to the client. The chaos suite found the gap this closes: an
+        # async producer holds events for up to `queue.buffering.max.ms`, and a
+        # SIGKILL in that window destroys them. A request whose `started` never
+        # landed has no pending row, so the sweeper cannot know it existed and
+        # it is unbillable — invisible, not merely wrong.
+        #
+        # The cost is one broker round-trip on time-to-first-token. That is the
+        # honest trade: a few milliseconds of latency against silently losing
+        # requests to a hard kill.
+        await asyncio.to_thread(state.bus.flush, 2.0)
 
     meter = StreamMeter(
         request_id=request_id,
@@ -294,20 +327,40 @@ async def chat_completions(
         prompt_tokens=prompt_tokens,
         tokenizer=encoder_for(model),
     )
-    state.sessions[request_id] = StreamSession(meter, tenant_id, idem_key)
+    session = StreamSession(meter, tenant_id, idem_key)
+    state.sessions[request_id] = session
     IN_FLIGHT.set(len(state.sessions))
 
+    # The pump is deliberately not tied to the response task: it must survive the
+    # client disconnecting so Ledger B still arrives. See _pump's docstring.
+    pump = asyncio.create_task(_pump(state, request_id, body, estimate, session.queue))
+    state.pumps.add(pump)
+    pump.add_done_callback(state.pumps.discard)
+
     return StreamingResponse(
-        _proxy(state, request_id, body, estimate),
+        _proxy(session),
         media_type="text/event-stream",
         headers={"X-Request-Id": request_id, "Cache-Control": "no-cache"},
     )
 
 
-async def _proxy(
-    state: GatewayState, request_id: str, body: dict, admitted: int
-) -> AsyncIterator[str]:
-    """Relay the upstream stream, metering and drawing budget as it passes."""
+async def _pump(
+    state: GatewayState, request_id: str, body: dict, admitted: int, queue: asyncio.Queue
+) -> None:
+    """Own the provider stream from first byte to settlement.
+
+    Deliberately **not** tied to the client's connection. The provider bills for
+    the whole completion whether or not anyone is still listening, so abandoning
+    the stream when the client hangs up would throw away the provider's usage
+    block — which arrives last — and with it Ledger B. That is exactly what the
+    chaos suite caught: without this, every client disconnect force-settles as
+    ``UNSETTLED_TIMEOUT`` and ``CLIENT_DISCONNECT_PARTIAL`` can never fire, so
+    the gateway silently loses the ability to tell "the client left" apart from
+    "the provider never reported".
+
+    Draining costs upstream time we no longer need, and that is the correct
+    trade: the alternative is being unable to account for money already spent.
+    """
     session = state.sessions[request_id]
     meter = session.meter
     terminal = TerminalState.COMPLETED
@@ -316,6 +369,17 @@ async def _proxy(
     # The admission draw already covers `admitted` tokens; only the overshoot
     # needs drawing again, or a tenant would be charged twice for the estimate.
     drawn = admitted
+
+    def emit(chunk: str) -> None:
+        """Hand a chunk to the client, or notice that it has stopped reading."""
+        if session.client_gone:
+            return
+        try:
+            queue.put_nowait(chunk)
+        except asyncio.QueueFull:
+            # Not draining fast enough to be a live reader. Stop buffering for
+            # it, but keep consuming upstream so the ledger stays complete.
+            session.client_gone = True
 
     try:
         async with state.client.stream(
@@ -327,7 +391,7 @@ async def _proxy(
             if response.status_code >= 400:
                 terminal = TerminalState.PROVIDER_ERROR
                 detail = (await response.aread()).decode(errors="replace")[:500]
-                yield f"data: {json.dumps({'error': detail})}\n\n"
+                emit(f"data: {json.dumps({'error': detail})}\n\n")
                 return
 
             async for line in response.aiter_lines():
@@ -347,24 +411,48 @@ async def _proxy(
                     if not decision.granted:
                         BUDGET_REJECTIONS.labels(session.tenant_id, "mid_stream").inc()
                         terminal = TerminalState.BUDGET_EXCEEDED
-                        yield _terminal_frame("length")
+                        emit(_terminal_frame("length"))
                         return
 
-                yield line + "\n"
+                emit(line + "\n")
 
     except (httpx.HTTPError, httpx.StreamError):
         terminal = TerminalState.PROVIDER_ERROR
-        raise
     except asyncio.CancelledError:
-        # Starlette cancels the response task when the client goes away. The
-        # partial count is real and must still be billed and attributed.
-        terminal = TerminalState.CLIENT_DISCONNECT
-        raise
-    except GeneratorExit:
-        terminal = TerminalState.CLIENT_DISCONNECT
+        # Only reached if the *pump* itself is cancelled — shutdown, not a
+        # client hanging up. Client disconnects never cancel this task.
+        terminal = TerminalState.GATEWAY_SHUTDOWN
         raise
     finally:
+        if session.client_gone and terminal is TerminalState.COMPLETED:
+            # Upstream finished, but the client never received it. Both ledgers
+            # exist, so the gap is attributable rather than a mystery.
+            terminal = TerminalState.CLIENT_DISCONNECT
+            ORPHANED_DRAINS.labels(session.tenant_id).inc()
+        with contextlib.suppress(asyncio.QueueFull):
+            queue.put_nowait(None)  # unblock the response generator
         await state.settle(request_id, terminal)
+
+
+async def _proxy(session: StreamSession) -> AsyncIterator[str]:
+    """Relay whatever the pump produces, for as long as the client is reading.
+
+    Thin by design: this coroutine dies with the client connection, and nothing
+    that matters for billing lives here. It takes the session directly rather
+    than looking it up — a short stream can settle (and drop the session) before
+    this generator is first iterated.
+    """
+    queue = session.queue
+    try:
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                return
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit):
+        # The client went away. The pump keeps running to settlement.
+        session.client_gone = True
+        raise
 
 
 def create_app(state: GatewayState | None = None) -> FastAPI:
