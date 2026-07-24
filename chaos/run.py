@@ -53,7 +53,40 @@ def _restore_provider() -> None:
     produced tokenizer_mismatch drift nobody had injected.
     """
     _run(f"{scenario_defs.COMPOSE} up -d --force-recreate provider")
-    time.sleep(3)
+    _await_gateway()
+
+
+def _await_gateway(timeout: float = 60.0) -> None:
+    """Block until the gateway can actually serve a request end to end.
+
+    A fixed sleep is not enough. Recreating the provider also invalidates the
+    gateway's pooled keepalive connections, so the first requests after a
+    restart can fail on a stale socket — which shows up as provider_error
+    settlements that look like a system bug but are really the harness starting
+    load too early.
+    """
+    import httpx
+
+    probe = {
+        "model": "gpt-4o-mini",
+        "stream": True,
+        "messages": [{"role": "user", "content": "readiness probe"}],
+    }
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with httpx.Client(base_url=GATEWAY, timeout=15.0) as client:
+                response = client.post(
+                    "/v1/chat/completions",
+                    json=probe,
+                    headers={"X-Tenant-Id": "warmup", "Idempotency-Key": f"warmup-{time.time()}"},
+                )
+                if response.status_code == 200 and '"error"' not in response.text:
+                    return
+        except httpx.HTTPError:
+            pass
+        time.sleep(1.0)
+    print("    warning: gateway did not become ready; results may be unreliable")
 
 
 async def _run_one(scenario, index: int, rps: float, duration: float) -> Report:

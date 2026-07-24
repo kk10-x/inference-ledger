@@ -61,9 +61,18 @@ ORPHANED_DRAINS = Counter(
     "gateway_orphaned_drains_total", "Streams drained after the client left", ["tenant"]
 )
 
+PROVIDER_RETRIES = Counter(
+    "gateway_provider_retries_total", "Upstream attempts retried before first token", ["tenant"]
+)
+
 #: Chunks buffered for a client that is not keeping up. Past this the client is
 #: treated as gone — the provider stream keeps draining regardless.
 _CLIENT_BUFFER = 256
+
+#: Total upstream attempts, i.e. one retry. Only ever used before a token has
+#: been produced; see the retry handler in _pump for why more is unsafe.
+_PROVIDER_ATTEMPTS = 2
+_RETRY_BACKOFF_SECONDS = 0.05
 
 
 @dataclass
@@ -382,42 +391,60 @@ async def _pump(
             session.client_gone = True
 
     try:
-        async with state.client.stream(
-            "POST",
-            "/chat/completions",
-            json=body,
-            headers={"Authorization": f"Bearer {state.settings.provider_api_key}"},
-        ) as response:
-            if response.status_code >= 400:
-                terminal = TerminalState.PROVIDER_ERROR
-                detail = (await response.aread()).decode(errors="replace")[:500]
-                emit(f"data: {json.dumps({'error': detail})}\n\n")
-                return
-
-            async for line in response.aiter_lines():
-                meter.consume(line)
-
-                if not first_token_seen and meter.completion_tokens > 0:
-                    TTFT.observe(time.monotonic() - started)
-                    first_token_seen = True
-
-                total = meter.prompt_tokens + meter.completion_tokens
-                overshoot = total - drawn
-                if overshoot > 0:
-                    decision = await state.budget.consume(
-                        session.tenant_id, overshoot, int(time.time() * 1000)
-                    )
-                    drawn = total
-                    if not decision.granted:
-                        BUDGET_REJECTIONS.labels(session.tenant_id, "mid_stream").inc()
-                        terminal = TerminalState.BUDGET_EXCEEDED
-                        emit(_terminal_frame("length"))
+        for attempt in range(_PROVIDER_ATTEMPTS):
+            try:
+                async with state.client.stream(
+                    "POST",
+                    "/chat/completions",
+                    json=body,
+                    headers={"Authorization": f"Bearer {state.settings.provider_api_key}"},
+                ) as response:
+                    if response.status_code >= 400:
+                        terminal = TerminalState.PROVIDER_ERROR
+                        detail = (await response.aread()).decode(errors="replace")[:500]
+                        emit(f"data: {json.dumps({'error': detail})}\n\n")
                         return
 
-                emit(line + "\n")
+                    async for line in response.aiter_lines():
+                        meter.consume(line)
 
-    except (httpx.HTTPError, httpx.StreamError):
-        terminal = TerminalState.PROVIDER_ERROR
+                        if not first_token_seen and meter.completion_tokens > 0:
+                            TTFT.observe(time.monotonic() - started)
+                            first_token_seen = True
+
+                        total = meter.prompt_tokens + meter.completion_tokens
+                        overshoot = total - drawn
+                        if overshoot > 0:
+                            decision = await state.budget.consume(
+                                session.tenant_id, overshoot, int(time.time() * 1000)
+                            )
+                            drawn = total
+                            if not decision.granted:
+                                BUDGET_REJECTIONS.labels(session.tenant_id, "mid_stream").inc()
+                                terminal = TerminalState.BUDGET_EXCEEDED
+                                emit(_terminal_frame("length"))
+                                return
+
+                        emit(line + "\n")
+                break
+
+            except (httpx.HTTPError, httpx.StreamError):
+                # Retry only while no token has been produced. At that point
+                # nothing has reached the client and nothing has been billed, so
+                # a second attempt cannot double-charge. Once tokens have flowed
+                # a retry would bill the prefix twice, so the failure stands.
+                #
+                # This matters in production, not just under chaos: any upstream
+                # deploy or restart leaves stale keepalive connections in the
+                # pool, and the next request to reuse one fails through no fault
+                # of its own.
+                if attempt + 1 < _PROVIDER_ATTEMPTS and meter.completion_tokens == 0:
+                    PROVIDER_RETRIES.labels(session.tenant_id).inc()
+                    await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+                    continue
+                terminal = TerminalState.PROVIDER_ERROR
+                break
+
     except asyncio.CancelledError:
         # Only reached if the *pump* itself is cancelled — shutdown, not a
         # client hanging up. Client disconnects never cancel this task.

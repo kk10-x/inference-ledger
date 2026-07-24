@@ -120,6 +120,29 @@ def test_sweeper_force_settles_expired_pending():
     assert repo.pending == {}
 
 
+def test_sweeper_evicts_the_joiner_buffer_it_settles():
+    """Otherwise buffered half-joins accumulate forever.
+
+    The sweeper writes straight to the ledger, so without an eviction hook the
+    joiner keeps the orphaned Ledger A indefinitely — a slow leak that also
+    makes the buffered-events gauge useless as a health signal.
+    """
+    repo = InMemoryLedger()
+    repo.record_pending("req-1", "acme", started_at=1000.0)
+    joiner = PendingJoiner()
+    joiner.on_metered(RequestMetered.model_validate(metered(completion=80)))
+    assert joiner.buffered_metered == 1
+
+    sweeper = Sweeper(
+        repo,
+        window_seconds=300,
+        metered_lookup=joiner.peek_metered,
+        on_settled=joiner.discard,
+    )
+    assert sweeper.sweep(now=1000.0 + 301) == 1
+    assert joiner.buffered_metered == 0
+
+
 def test_sweeper_ignores_requests_within_the_window():
     repo = InMemoryLedger()
     repo.record_pending("req-1", "acme", started_at=1000.0)

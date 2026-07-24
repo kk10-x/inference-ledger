@@ -189,7 +189,8 @@ def run(settings: Settings | None = None) -> None:  # pragma: no cover - needs a
     sweeper = Sweeper(
         repo,
         settings.settlement_window_seconds,
-        metered_lookup=lambda rid: reconciler.joiner._metered.get(rid),
+        metered_lookup=reconciler.joiner.peek_metered,
+        on_settled=reconciler.joiner.discard,
     )
 
     start_http_server(METRICS_PORT)

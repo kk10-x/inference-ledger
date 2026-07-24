@@ -70,6 +70,22 @@ class PendingJoiner:
         self._settled.add(metered.request_id)
         return attribute(metered, None, tolerance=self._tolerance)
 
+    def discard(self, request_id: str) -> None:
+        """Drop any buffered half-join for a request settled elsewhere.
+
+        The sweeper writes its settlement straight to the ledger, so without
+        this the joiner keeps the orphaned Ledger A forever and
+        ``buffered_events`` grows without bound — a slow leak that also makes
+        the gauge useless as a health signal.
+        """
+        self._metered.pop(request_id, None)
+        self._usage.pop(request_id, None)
+        self._settled.add(request_id)
+
+    def peek_metered(self, request_id: str) -> RequestMetered | None:
+        """Read a buffered Ledger A without consuming it (used by the sweeper)."""
+        return self._metered.get(request_id)
+
     def forget(self, request_id: str) -> None:
         """Drop settled-set membership once it can no longer be contradicted.
 

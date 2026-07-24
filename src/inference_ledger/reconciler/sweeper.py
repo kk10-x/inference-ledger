@@ -30,13 +30,18 @@ log = logging.getLogger("reconciler.sweeper")
 
 
 class Sweeper:
-    def __init__(self, repo: LedgerRepo, window_seconds: int, metered_lookup) -> None:
+    def __init__(
+        self, repo: LedgerRepo, window_seconds: int, metered_lookup, on_settled=None
+    ) -> None:
         self._repo = repo
         self._window = window_seconds
         # Returns the last-known metered total for a request_id, or None. In the
         # process this is the joiner's buffer; the sweeper stays testable by
         # taking it as a callable rather than reaching into the joiner.
         self._metered_lookup = metered_lookup
+        # Called for each swept request so the joiner can drop its buffered
+        # half-join. Without it those entries are never reclaimed.
+        self._on_settled = on_settled
 
     def sweep(self, now: float | None = None) -> int:
         """Force-settle everything past the window. Returns the count swept."""
@@ -68,6 +73,10 @@ class Sweeper:
             )
             if created:
                 swept += 1
+            # Evict regardless: the request is settled either way, and a
+            # buffered entry for it can now only be a leak.
+            if self._on_settled is not None:
+                self._on_settled(request_id)
 
         if swept:
             log.info("swept %d unsettled requests (window=%ds)", swept, self._window)
