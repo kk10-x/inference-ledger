@@ -39,11 +39,20 @@ def replay(topics: list[str], bootstrap: str, limit: int) -> int:
             print(f"topic missing: {topic}", file=sys.stderr)
             continue
         for pid in metadata.topics[topic].partitions:
-            partitions.append(TopicPartition(topic, pid, 0))
+            # Start near the tail, not at offset 0. Replaying from the beginning
+            # re-delivers every event the cluster has ever seen — which is not
+            # "a consumer restarted and re-read a few messages", it is a flood
+            # of unrelated history that makes the measurement meaningless.
+            _low, high = consumer.get_watermark_offsets(
+                TopicPartition(topic, pid), timeout=10, cached=False
+            )
+            start = max(0, high - limit)
+            partitions.append(TopicPartition(topic, pid, start))
     consumer.assign(partitions)
 
+    budget = limit * len(partitions)
     replayed = 0
-    while replayed < limit:
+    while replayed < budget:
         msg = consumer.poll(2.0)
         if msg is None:
             break  # drained

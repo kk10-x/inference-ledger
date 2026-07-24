@@ -80,7 +80,11 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="duplicate-delivery",
         description="Replay committed offsets so every event is delivered twice.",
-        inject=f"{PY} -m chaos.replay --topics requests.metered provider.usage",
+        inject=f"{PY} -m chaos.replay --topics requests.metered provider.usage --limit 60",
+        # Redelivery is absorbed by the ledger primary key, so the *settlement*
+        # count must not move. The joiner does flag the second sighting of a
+        # request it already settled, which is the correct signal.
+        expected_reasons=frozenset({DriftReason.RETRY_DOUBLE_COUNT}),
     ),
     Scenario(
         name="client-disconnect",

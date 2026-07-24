@@ -37,36 +37,53 @@ def _connect():
     return psycopg.connect(DSN, autocommit=True)
 
 
-def _reset(conn) -> None:
-    conn.execute("TRUNCATE settlements, pending_settlements, idempotency_index")
-
-
-def _inject(command: str) -> None:
+def _run(command: str) -> None:
     if not command:
         return
     subprocess.run(command, shell=True, check=False, capture_output=True)
 
 
-async def _run_one(scenario, rps: float, duration: float) -> Report:
-    conn = _connect()
-    _reset(conn)
+def _restore_provider() -> None:
+    """Put the mock provider back to fault-free defaults.
+
+    Scenarios mutate it by restarting it with CHAOS_* env set. Compose only
+    recreates a container when its resolved config changes, so without an
+    explicit restore a fault silently persists into whichever scenario runs
+    next — which is exactly how usage-skew leaked into the rebalance run and
+    produced tokenizer_mismatch drift nobody had injected.
+    """
+    _run(f"{scenario_defs.COMPOSE} up -d --force-recreate provider")
+    time.sleep(3)
+
+
+async def _run_one(scenario, index: int, rps: float, duration: float) -> Report:
+    # Tenants are namespaced per scenario so counting survives a shared cluster:
+    # topics, reconciler offsets and join buffers all outlive a TRUNCATE.
+    prefix = f"s{index}-{scenario.name}"
+    _restore_provider()
 
     disconnect_rate = 0.1 if scenario.name == "client-disconnect" else 0.0
 
     # Load runs concurrently with the fault; injection is fired partway in so it
     # lands on streams that are already open.
     load_task = asyncio.create_task(
-        generate(GATEWAY, rps=rps, duration=duration, disconnect_rate=disconnect_rate)
+        generate(
+            GATEWAY,
+            rps=rps,
+            duration=duration,
+            disconnect_rate=disconnect_rate,
+            tenant_prefix=prefix,
+        )
     )
     await asyncio.sleep(min(5.0, duration / 3))
-    await asyncio.to_thread(_inject, scenario.inject)
+    await asyncio.to_thread(_run, scenario.inject)
     stats = await load_task
 
     # Let the sweeper's window elapse plus a margin for the final sweep tick.
-    await asyncio.sleep(WINDOW + 10)
+    await asyncio.sleep(WINDOW + 15)
 
-    conn = _connect()  # reconnect: the injected fault may have killed the old one
-    report = collect(conn, scenario.name, started=len(stats.request_ids))
+    conn = _connect()  # connect late: the injected fault may have killed the DB link
+    report = collect(conn, scenario.name, len(stats.request_ids), tenant_prefix=f"{prefix}-%")
     report = check(
         report,
         expected_reasons=frozenset(r.value for r in scenario.expected_reasons),
@@ -101,10 +118,10 @@ async def _main_async(args) -> int:
         return 2
 
     reports: list[Report] = []
-    for scenario in selected:
+    for index, scenario in enumerate(selected):
         print(f"\n[{scenario.name}] {scenario.description}")
         started = time.monotonic()
-        reports.append(await _run_one(scenario, args.rps, args.duration))
+        reports.append(await _run_one(scenario, index, args.rps, args.duration))
         print(f"    took {time.monotonic() - started:.0f}s")
 
     _print_table(reports)

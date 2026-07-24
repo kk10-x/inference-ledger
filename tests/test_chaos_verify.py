@@ -33,6 +33,18 @@ def test_unattributed_drift_fails():
     assert any("no reason code" in f for f in r.failures)
 
 
+def test_any_drift_fails_when_none_is_expected():
+    """An empty expected set means 'no drift permitted', not 'skip the check'.
+
+    The permissive reading let a fault-free baseline pass while a third of its
+    requests were force-settling — the harness was grading a clean run on
+    accounting alone and reporting success.
+    """
+    r = check(report(reasons={"unsettled_timeout": 100}), expected_reasons=frozenset())
+    assert not r.passed
+    assert any("unexpected drift reasons" in f for f in r.failures)
+
+
 def test_expected_drift_passes():
     r = check(
         report(reasons={"client_disconnect_partial": 12}),

@@ -95,7 +95,10 @@ async def generate(
     disconnect_rate: float = 0.0,
     tenants: int = 4,
     seed: int = 7,
+    tenant_prefix: str = "load",
 ) -> LoadStats:
+    """Drive load. ``tenant_prefix`` tags this run so its settlements can be
+    counted in isolation from anything already in a shared cluster."""
     rng = random.Random(seed)
     stats = LoadStats()
     tasks: set[asyncio.Task] = set()
@@ -106,7 +109,7 @@ async def generate(
         base_url=base_url, timeout=httpx.Timeout(60.0), limits=limits
     ) as client:
         while time.monotonic() < deadline:
-            tenant = f"tenant-{rng.randrange(tenants)}"
+            tenant = f"{tenant_prefix}-{rng.randrange(tenants)}"
             task = asyncio.create_task(_one_request(client, stats, tenant, disconnect_rate, rng))
             tasks.add(task)
             task.add_done_callback(tasks.discard)
@@ -127,10 +130,19 @@ def main() -> int:
     parser.add_argument("--disconnect-rate", type=float, default=0.0)
     parser.add_argument("--tenants", type=int, default=4)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--tenant-prefix", default="load")
     args = parser.parse_args()
 
     stats = asyncio.run(
-        generate(args.url, args.rps, args.duration, args.disconnect_rate, args.tenants, args.seed)
+        generate(
+            args.url,
+            args.rps,
+            args.duration,
+            args.disconnect_rate,
+            args.tenants,
+            args.seed,
+            args.tenant_prefix,
+        )
     )
     print(stats.summary())
     return 0
