@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: inference-ledger
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      # Dashboards live in their own subdirectory so Grafana does not try to
+      # parse this provider config as a dashboard.
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false

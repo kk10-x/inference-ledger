@@ -1,0 +1,203 @@
+{
+  "uid": "inference-ledger",
+  "title": "inference-ledger — reconciliation",
+  "tags": ["inference-ledger"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Is the ledger telling the truth?",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Unattributed drift",
+      "description": "Drift tokens with no reason code. This is the number that must stay at zero — unexplained money is the failure this project exists to eliminate.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" },
+      "targets": [
+        {
+          "expr": "sum(reconciler_drift_tokens_total) - sum(reconciler_drift_tokens_total{reason!=\"\"})",
+          "legendFormat": "unattributed",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Requests half-joined",
+      "description": "Events buffered waiting for their counterpart. A steady non-zero value is normal under load; a monotonic climb means one side of the join has stopped arriving.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        { "expr": "sum(reconciler_buffered_events)", "legendFormat": "buffered", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Force-settled (sweeper)",
+      "description": "Requests billed on the gateway count alone because provider usage never arrived. A rising rate means Ledger B has stopped flowing.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        { "expr": "reconciler_sweeps_total", "legendFormat": "swept", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Duplicates absorbed",
+      "description": "Redelivered settlements collapsed by the ledger primary key. Non-zero is expected under at-least-once delivery; a spike means something upstream is retrying hard.",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        {
+          "expr": "reconciler_duplicate_settlements_total",
+          "legendFormat": "absorbed",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Drift by reason",
+      "description": "The core panel. 'Usage is 3% off' is not actionable; 'client disconnects account for 40 tokens/s of provider overbilling' is.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 25, "stacking": { "mode": "normal" }, "lineWidth": 1 },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(reconciler_drift_total[1m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Settlements by status",
+      "description": "settled = both ledgers agreed. settled_with_drift = they disagreed and we know why. force_settled = Ledger B never came.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 25, "stacking": { "mode": "normal" }, "lineWidth": 1 },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(reconciler_settlements_total[1m]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Gateway",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by terminal state",
+      "description": "How streams ended. Partial states (client_disconnect, budget_exceeded, gateway_shutdown) each settle exactly once rather than leaving a hole.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 25, "stacking": { "mode": "normal" }, "lineWidth": 1 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (terminal_state) (rate(gateway_requests_total[1m]))",
+          "legendFormat": "{{terminal_state}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Time to first token",
+      "description": "Metering is incremental and must not cost latency. If p99 climbs when the ledger is under load, the passthrough is buffering somewhere it shouldn't.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gateway_time_to_first_token_seconds_bucket[1m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gateway_time_to_first_token_seconds_bucket[1m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gateway_time_to_first_token_seconds_bucket[1m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Streams in flight",
+      "description": "Open streams. This is what a graceful shutdown has to drain before the pod can exit.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 1 } }
+      },
+      "targets": [
+        { "expr": "gateway_streams_in_flight", "legendFormat": "in flight", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens metered by tenant",
+      "description": "Ledger A throughput per tenant — what billing would be based on.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum by (tenant) (rate(gateway_tokens_metered_total[1m]))",
+          "legendFormat": "{{tenant}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Budget rejections",
+      "description": "admission = rejected before spending anything upstream. mid_stream = cut while generating, which is the one that needs attributing.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum by (stage) (rate(gateway_budget_rejections_total[1m]))",
+          "legendFormat": "{{stage}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

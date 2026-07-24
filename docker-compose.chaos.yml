@@ -14,11 +14,14 @@ services:
       dockerfile: docker/Dockerfile
     command: uvicorn chaos.provider:app --host 0.0.0.0 --port 9000
     environment:
-      CHAOS_CHUNKS: "40"
-      CHAOS_CHUNK_DELAY_MS: "8"
-      CHAOS_TRUNCATE_RATE: "0"
-      CHAOS_USAGE_SKEW: "0"
-      CHAOS_NO_USAGE_RATE: "0"
+      # Substituted from the shell so a scenario can inject a fault with
+      # `CHAOS_USAGE_SKEW=4 docker compose up -d provider`. Hardcoding these
+      # would silently override the scenario and the fault would never fire.
+      CHAOS_CHUNKS: "${CHAOS_CHUNKS:-40}"
+      CHAOS_CHUNK_DELAY_MS: "${CHAOS_CHUNK_DELAY_MS:-8}"
+      CHAOS_TRUNCATE_RATE: "${CHAOS_TRUNCATE_RATE:-0}"
+      CHAOS_USAGE_SKEW: "${CHAOS_USAGE_SKEW:-0}"
+      CHAOS_NO_USAGE_RATE: "${CHAOS_NO_USAGE_RATE:-0}"
     expose:
       - "9000"
 

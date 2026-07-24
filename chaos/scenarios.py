@@ -14,12 +14,16 @@ with no drift at all, but fails the moment drift appears that it cannot explain.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 
 from inference_ledger.events import DriftReason
 
 #: Both compose files, since the suite only ever runs under the chaos overlay.
 COMPOSE = "docker compose -f docker-compose.yml -f docker-compose.chaos.yml"
+#: The interpreter running the suite — a bare `python` would not resolve to the
+#: virtualenv that has confluent-kafka installed.
+PY = sys.executable
 
 
 @dataclass(frozen=True)
@@ -71,7 +75,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="duplicate-delivery",
         description="Replay committed offsets so every event is delivered twice.",
-        inject="python -m chaos.replay --topics requests.metered provider.usage",
+        inject=f"{PY} -m chaos.replay --topics requests.metered provider.usage",
     ),
     Scenario(
         name="client-disconnect",
