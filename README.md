@@ -9,11 +9,11 @@ what actually crossed the wire. `inference-ledger` counts tokens off the stream 
 provider-reported usage on a separate path, joins the two in Kafka, and settles every request with
 a reason code when they disagree.
 
-> **Status:** active build. The gateway request path, the reconciler (stateful join + sweeper) and
-> the attribution logic are implemented and tested (53 tests, no broker required — every dependency
-> has an in-process fake), and the full loop has been run against a live Redpanda + Postgres
-> deployment. The chaos runner and cloud/K8s deploy are in progress. See [Milestones](#milestones).
-> Nothing in this README claims a result that isn't in the repo.
+> **Status:** the core system is complete and measured. Gateway, reconciler, sweeper and the chaos
+> suite are implemented and tested — 74 unit tests that need no broker, plus
+> [9/9 chaos scenarios](#chaos-results) passing against a live deployment. Kubernetes and cloud
+> deploy remain; see [Milestones](#milestones). Nothing in this README claims a result that isn't
+> reproducible from the repo.
 
 ## Tech stack
 
@@ -123,6 +123,74 @@ make load     # Poisson-burst load generator
 make chaos    # failure injection; asserts drift converges and is attributed
 ```
 
+## Chaos results
+
+Nine scenarios, run against a live stack (Redpanda, Postgres, Redis, gateway, reconciler) on a
+16GB home server. ~270 requests each at 15 rps with Poisson arrivals, a 30s settlement window, and
+the fault injected while streams are in flight.
+
+| Scenario | Reqs | Accounted | Pending | Drift observed |
+|---|---:|---:|---:|---|
+| baseline | 270 | 100.00% | 0 | none |
+| broker-partition | 270 | 100.00% | 0 | none |
+| gateway-sigkill | 252 | 100.00% | 0 | 4 × `unsettled_timeout` |
+| gateway-sigterm-drain | 245 | 100.00% | 0 | none |
+| duplicate-delivery | 271 | 100.00% | 0 | none |
+| client-disconnect | 292 | 100.00% | 0 | none (27 disconnects, settled exact) |
+| provider-usage-blackhole | 270 | 100.00% | 0 | 195 × `unsettled_timeout` |
+| provider-usage-skew | 271 | 100.00% | 0 | 175 × `tokenizer_mismatch`, 700 tokens |
+| reconciler-rebalance | 270 | 100.00% | 0 | none |
+
+**What is actually being asserted.** Not "drift went to zero" — drift is *expected* under several of
+these faults, and a suite reporting none would only prove it had stopped looking. The invariants
+are: every request that started reaches a terminal settlement, every drift token carries a reason
+code, and no request is billed twice. A scenario also fails if drift appears that it cannot explain,
+so converging *for the wrong reason* is still a failure.
+
+Three results are worth reading closely:
+
+- **`provider-usage-skew`: 175 requests, 700 tokens — exactly 175 × 4**, the injected per-request
+  skew, recovered precisely. No infrastructure failed here. This is silent overbilling that a
+  single-ledger tool cannot see by construction, because it has nothing to compare against.
+- **`gateway-sigterm-drain`: zero drift.** Streams drained, meters finalized, the producer flushed
+  inside its reserved window. A rollout costs nothing in billing accuracy.
+- **`client-disconnect`: 27 disconnects, zero drift, settled exact.** Because the gateway keeps
+  draining the provider stream after the client leaves, both ledgers agree and the disconnect is
+  recorded as a terminal state rather than as a discrepancy. Draining *removes* the drift instead of
+  attributing it, which is strictly better: you know exactly what you owe.
+
+The `unsettled_timeout` counts are the sweeper doing its job — 195 of them in the blackhole scenario
+is the provider-usage feed being switched off entirely, which is the point of that test.
+
+**Reproduce:** `docker compose -f docker-compose.yml -f docker-compose.chaos.yml up -d --build`,
+then `python -m chaos.run`. The suite drives a **mock upstream** ([chaos/provider.py](chaos/provider.py))
+that can be told to truncate streams, omit usage, or misreport it — a real provider API cannot be
+made to fail on demand, and the numbers above are synthetic by construction because of it.
+
+### What the suite found
+
+It was built to produce evidence and instead produced a bug list — which is the more useful outcome:
+
+1. **`CLIENT_DISCONNECT_PARTIAL` was unreachable.** A client hanging up cancelled the response
+   generator, which closed the upstream stream, so the provider's usage block — which arrives last —
+   was never read. Every disconnect force-settled as `UNSETTLED_TIMEOUT`, and the gateway could not
+   distinguish "the client left" from "the provider never reported". The provider stream now outlives
+   the client connection.
+2. **`SIGKILL` could make requests vanish.** `requests.started` went to a buffering producer while
+   response headers returned immediately; a hard kill inside that window destroyed the event, leaving
+   no pending row and therefore no way for the sweeper to know the request had existed. Now flushed
+   before the first byte.
+3. **The sweeper raced its own consumer.** It force-settled on elapsed time without checking whether
+   it had read the log — a backlog is indistinguishable from a provider that never reported. Now
+   gated on zero consumer lag, with batched offset commits (the synchronous per-message commit was
+   causing the lag).
+4. **No retry on stale upstream connections.** Any upstream restart leaves dead keepalive
+   connections in the pool. The gateway now retries once, but *only before the first token* — after
+   that a retry would bill the prefix twice.
+
+Three harness defects were fixed alongside them, all of which had been making results look better
+than they were; the commit history has the details.
+
 ## Milestones
 
 - [x] Event model and settlement state machine
@@ -131,8 +199,8 @@ make chaos    # failure injection; asserts drift converges and is attributed
 - [x] Gateway HTTP surface: SSE passthrough, idempotency, budgets — 38 tests, no broker required
 - [x] Reconciler consumer loop, stateful joiner and sweeper — full loop verified against a live
       Redpanda + Postgres deployment (clean / drift / force-settle all land correctly)
-- [ ] Chaos runner and load generator; drift-convergence numbers in this README
-- [ ] Grafana dashboard + screenshot in `assets/`
+- [x] Chaos runner and load generator — 9/9 scenarios passing, numbers above
+- [ ] Grafana dashboard screenshot in `assets/` (dashboard is provisioned; image pending)
 - [ ] Helm chart, kind setup, graceful-drain verification
 - [ ] Terraform for EKS + MSK Serverless + RDS
 

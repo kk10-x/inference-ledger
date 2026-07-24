@@ -89,10 +89,14 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="client-disconnect",
         description=(
-            "Drop 10% of client connections mid-stream. The provider bills the "
-            "full completion; the gateway saw only part of it."
+            "Drop 10% of client connections mid-stream. Because the gateway "
+            "drains the provider stream anyway, these settle exactly — the "
+            "disconnect is recorded as a terminal state, not as drift."
         ),
         inject="",  # produced by the load generator's --disconnect-rate
+        # CLIENT_DISCONNECT_PARTIAL is permitted but no longer expected in the
+        # common case: draining removes the discrepancy instead of attributing
+        # it. It remains reachable when the drain itself is cut short.
         expected_reasons=frozenset({DriftReason.CLIENT_DISCONNECT_PARTIAL}),
     ),
     Scenario(
