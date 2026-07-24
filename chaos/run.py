@@ -25,6 +25,12 @@ from chaos import scenarios as scenario_defs
 from chaos.load import generate
 from chaos.verify import Report, check, collect
 
+#: Unique per invocation. Scenario index alone is not enough: the ledger is not
+#: truncated between runs (deliberately — the rows are evidence), so a fixed
+#: prefix makes a rerun count the previous run's settlements as its own. That is
+#: precisely how a clean baseline reported 199% accounted.
+RUN_ID = f"r{int(time.time()) % 100_000:05d}"
+
 DSN = os.getenv("POSTGRES_DSN", "postgresql://ledger:ledger@localhost:5432/ledger")
 GATEWAY = os.getenv("GATEWAY_URL", "http://localhost:8080")
 # Kept short for the suite; production defaults to 300s.
@@ -92,7 +98,7 @@ def _await_gateway(timeout: float = 60.0) -> None:
 async def _run_one(scenario, index: int, rps: float, duration: float) -> Report:
     # Tenants are namespaced per scenario so counting survives a shared cluster:
     # topics, reconciler offsets and join buffers all outlive a TRUNCATE.
-    prefix = f"s{index}-{scenario.name}"
+    prefix = f"{RUN_ID}-s{index}"
     _restore_provider()
 
     disconnect_rate = 0.1 if scenario.name == "client-disconnect" else 0.0
