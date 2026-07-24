@@ -59,6 +59,15 @@ def _restore_provider() -> None:
     produced tokenizer_mismatch drift nobody had injected.
     """
     _run(f"{scenario_defs.COMPOSE} up -d --force-recreate provider")
+    # Recreating the provider leaves the gateway holding a pool of dead
+    # keepalive connections. The gateway retries once, which clears one dead
+    # connection per request — so a burst immediately afterwards still sees a
+    # small residual failure rate as requests find *other* stale sockets. That
+    # is a genuine property of connection pooling across an upstream restart,
+    # not something the harness should hide; but it must not contaminate the
+    # measurement of an unrelated fault either. Restarting the gateway empties
+    # the pool, so each scenario starts from a known-clean connection state.
+    _run(f"{scenario_defs.COMPOSE} restart gateway")
     _await_gateway()
 
 
