@@ -11,9 +11,10 @@ a reason code when they disagree.
 
 > **Status:** the core system is complete and measured. Gateway, reconciler, sweeper and the chaos
 > suite are implemented and tested — 74 unit tests that need no broker, plus
-> [9/9 chaos scenarios](#chaos-results) passing against a live deployment. Kubernetes and cloud
-> deploy remain; see [Milestones](#milestones). Nothing in this README claims a result that isn't
-> reproducible from the repo.
+> [9/9 chaos scenarios](#chaos-results) passing against a live deployment, and a
+> [Helm chart on kind](#kubernetes) with graceful drain verified under pod eviction. The AWS
+> (Terraform) deploy is the last milestone; see [Milestones](#milestones). Nothing in this README
+> claims a result that isn't reproducible from the repo.
 
 ![Reconciliation dashboard](assets/dashboard.png)
 
@@ -131,6 +132,48 @@ make load     # Poisson-burst load generator
 make chaos    # failure injection; asserts drift converges and is attributed
 ```
 
+## Kubernetes
+
+A Helm chart ([deploy/helm/inference-ledger](deploy/helm/inference-ledger)) deploys the gateway and
+reconciler, and optionally the backing infrastructure so one `helm install` stands the whole system
+up on a local [kind](https://kind.sigs.k8s.io) cluster:
+
+```bash
+PROVIDER_API_KEY=sk-... ./deploy/kind/bootstrap.sh
+```
+
+The chart is where the shutdown design meets Kubernetes:
+
+- **Graceful drain.** The gateway's `terminationGracePeriodSeconds`, `preStop` delay and readiness
+  probe are wired to the drain sequence in [docs/shutdown.md](docs/shutdown.md). Readiness flips to
+  503 on `SIGTERM` so the Service stops routing new traffic; liveness stays up so the pod is not
+  killed mid-drain. A render-time guard **fails the install** if the grace period is set below the
+  drain window.
+- **Dependency-gated startup.** An init container blocks until Postgres, Redpanda and Redis accept
+  connections, so pods start clean instead of crash-looping until the database is ready.
+- **Managed-service ready.** The bundled Redpanda / Postgres / Redis are toggle-off. Disable them and
+  point the endpoints at MSK / RDS / ElastiCache — the reconciler applies its schema itself on
+  startup precisely so it works against a managed database with no init-script mount.
+- **Autoscaling + topic bootstrap.** An HPA scales the gateway on CPU; a post-install hook Job
+  creates the Kafka topics with the right partitioning.
+
+**Graceful-drain verification.** [deploy/kind/verify-drain.sh](deploy/kind/verify-drain.sh) is the
+Kubernetes analogue of the chaos suite's `gateway-sigterm-drain`: it drives 60 streaming requests,
+deletes a gateway pod mid-flight, and asserts the ledger stays exact. Result on kind:
+
+```
+==> delete a gateway pod mid-flight (SIGTERM + graceful drain)
+    deleted pod/il-gateway-6994cc7755-l7nhr
+settlements before : 116
+settlements after  : 176      # +60, every in-flight request settled
+still pending      : 0
+double-counts      : 0
+PASS: graceful drain settled every in-flight request exactly once
+```
+
+> The HPA needs a metrics-server to actuate, which bare kind does not ship; the manifest is correct
+> and scales on a real cluster. Everything else above runs as shown on kind.
+
 ## Chaos results
 
 Nine scenarios, run against a live stack (Redpanda, Postgres, Redis, gateway, reconciler) on a
@@ -209,7 +252,7 @@ than they were; the commit history has the details.
       Redpanda + Postgres deployment (clean / drift / force-settle all land correctly)
 - [x] Chaos runner and load generator — 9/9 scenarios passing, numbers above
 - [x] Grafana dashboard, provisioned + captured under live load ([assets/dashboard.png](assets/dashboard.png))
-- [ ] Helm chart, kind setup, graceful-drain verification
+- [x] Helm chart + kind setup with dependency-gated startup; graceful-drain verified on Kubernetes
 - [ ] Terraform for EKS + MSK Serverless + RDS
 
 ## Why I built this
