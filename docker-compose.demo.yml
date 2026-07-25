@@ -1,0 +1,25 @@
+# Hosting overlay for the always-on public demo.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.chaos.yml \
+#                  -f docker-compose.demo.yml up -d
+#
+# Two differences from the chaos overlay it builds on:
+#   * restart: unless-stopped everywhere, so the demo survives a host reboot.
+#   * the mock provider runs a mild, realistic fault mix (a few percent of
+#     requests miss their usage block), so the live dashboard shows the sweeper
+#     and attributed drift rather than a flat healthy line — with zero real spend
+#     because the upstream is the mock, not a paid API.
+services:
+  redpanda:   {restart: unless-stopped}
+  postgres:   {restart: unless-stopped}
+  redis:      {restart: unless-stopped}
+  prometheus: {restart: unless-stopped}
+  grafana:    {restart: unless-stopped}
+  reconciler: {restart: unless-stopped}
+  gateway:    {restart: unless-stopped}
+  provider:
+    restart: unless-stopped
+    environment:
+      CHAOS_USAGE_SKEW: "0"
+      CHAOS_NO_USAGE_RATE: "0.06"
+      CHAOS_TRUNCATE_RATE: "0.02"
