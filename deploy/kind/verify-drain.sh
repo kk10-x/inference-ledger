@@ -25,12 +25,14 @@ sql() { kubectl exec "deploy/${RELEASE}-postgres" -- psql -U ledger -d ledger -t
 before=$(sql "SELECT count(*) FROM settlements")
 
 echo "==> drive 60 streaming requests in the background"
+pids=()
 for i in $(seq 1 60); do
   curl -s -N -m 30 localhost:18080/v1/chat/completions \
     -H 'Content-Type: application/json' \
     -H "X-Tenant-Id: drain" -H "Idempotency-Key: drain-$i" \
     -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"drain test"}]}' \
     >/dev/null 2>&1 &
+  pids+=($!)
   sleep 0.15
 done
 
@@ -40,7 +42,9 @@ kubectl delete "$victim" --wait=false
 echo "    deleted $victim"
 
 echo "==> wait for load to finish and the settlement window to pass"
-wait  # background curls
+# Wait only on the request PIDs — a bare `wait` would also block on the
+# port-forward, which never exits.
+wait "${pids[@]}" 2>/dev/null || true
 sleep 40
 
 after=$(sql "SELECT count(*) FROM settlements")
