@@ -29,8 +29,8 @@ services:
       POSTGRES_DB: ledger
     ports:
       - "127.0.0.1:5432:5432"
-    volumes:
-      - ./src/inference_ledger/ledger/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # No schema mount: the reconciler applies schema.sql itself on startup
+    # (idempotent, and the only approach that also works against managed RDS).
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ledger"]
       interval: 5s

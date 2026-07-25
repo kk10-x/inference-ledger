@@ -1,0 +1,8 @@
+# Single-node kind cluster for the inference-ledger chart.
+# One node is plenty: the point is to exercise the manifests, probes and drain
+# behaviour, not to test multi-node scheduling.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: inference-ledger
+nodes:
+  - role: control-plane

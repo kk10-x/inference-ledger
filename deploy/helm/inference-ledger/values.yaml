@@ -1,0 +1,96 @@
+# Default values for inference-ledger.
+# The bundled-infra defaults target a local kind cluster. For a real cluster,
+# set the *.enabled flags to false and point the endpoints at managed services.
+
+image:
+  repository: inference-ledger
+  # Overridden per-workload below only if they ever diverge; both the gateway
+  # and reconciler ship from the same image.
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent  # kind loads images locally; never pull over the net
+
+# Upstream model provider. The API key is the one secret in the system.
+provider:
+  baseUrl: "https://api.openai.com/v1"
+  # Supply at install time: --set-string provider.apiKey=sk-...
+  # or point existingSecret at a Secret you manage out of band.
+  apiKey: ""
+  existingSecret: ""
+  secretKey: "provider-api-key"
+
+# Endpoints. When the bundled infra is disabled these are the only things that
+# need to change — swap in the managed-service DNS names.
+endpoints:
+  kafkaBootstrap: ""   # defaults to the in-chart Redpanda when empty
+  redisUrl: ""         # defaults to the in-chart Redis when empty
+  postgresDsn: ""      # defaults to the in-chart Postgres when empty
+
+reconciliation:
+  settlementWindowSeconds: 300
+  driftToleranceTokens: 0
+
+budget:
+  tenantTokens: 200000
+  refillTokensPerSecond: 50
+
+gateway:
+  replicas: 2
+  port: 8080
+  # Must exceed the drain (shutdown.grace) plus a margin, or a rollout truncates
+  # in-flight streams. This is the Kubernetes half of docs/shutdown.md.
+  terminationGracePeriodSeconds: 55
+  shutdown:
+    graceSeconds: 40
+    flushReserveSeconds: 10
+  # preStop delay covers Service-endpoint propagation before the drain starts.
+  preStopSeconds: 5
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {memory: 512Mi}
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+reconciler:
+  # One replica by default. The joiner keeps per-partition state, so scaling is
+  # safe (Kafka rebalances partitions across the group) but the sweeper and the
+  # metrics read cleanest with a single consumer at demo scale.
+  replicas: 1
+  metricsPort: 9100
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {memory: 512Mi}
+
+# --- Bundled infrastructure (disable to use managed services) ---
+
+redpanda:
+  enabled: true
+  image: redpandadata/redpanda:v24.3.1
+  memory: "1G"
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {memory: 1536Mi}
+
+postgres:
+  enabled: true
+  image: postgres:17-alpine
+  user: ledger
+  password: ledger
+  database: ledger
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 256Mi}
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 128Mi}
+
+# Emit prometheus.io/scrape annotations so an in-cluster Prometheus finds the
+# gateway and reconciler without extra ServiceMonitor wiring.
+metrics:
+  annotations: true

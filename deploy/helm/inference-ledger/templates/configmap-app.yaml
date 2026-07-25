@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "il.labels" . | nindent 4 }}
+data:
+  PROVIDER_BASE_URL: {{ .Values.provider.baseUrl | quote }}
+  KAFKA_BOOTSTRAP: {{ include "il.kafkaBootstrap" . | quote }}
+  REDIS_URL: {{ include "il.redisUrl" . | quote }}
+  POSTGRES_DSN: {{ include "il.postgresDsn" . | quote }}
+  SETTLEMENT_WINDOW_SECONDS: {{ .Values.reconciliation.settlementWindowSeconds | quote }}
+  DRIFT_TOLERANCE_TOKENS: {{ .Values.reconciliation.driftToleranceTokens | quote }}
+  TENANT_BUDGET_TOKENS: {{ .Values.budget.tenantTokens | quote }}
+  TENANT_REFILL_TOKENS_PER_SECOND: {{ .Values.budget.refillTokensPerSecond | quote }}
+  SHUTDOWN_GRACE_SECONDS: {{ .Values.gateway.shutdown.graceSeconds | quote }}
+  SHUTDOWN_FLUSH_RESERVE_SECONDS: {{ .Values.gateway.shutdown.flushReserveSeconds | quote }}

@@ -1,0 +1,41 @@
+{{- if .Values.redpanda.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-create-topics
+  labels:
+    {{- include "il.labels" . | nindent 4 }}
+    app.kubernetes.io/component: topics
+  annotations:
+    # Run after the release is applied, on install and upgrade. Topic creation
+    # is idempotent (rpk exits fine if they exist), so re-running is harmless.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "il.selector" . | nindent 8 }}
+        app.kubernetes.io/component: topics
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: {{ .Values.redpanda.image }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              BROKER={{ .Release.Name }}-redpanda:9092
+              # The hook may fire before Redpanda is serving; wait it out rather
+              # than failing the release.
+              until rpk cluster info --brokers "$BROKER" >/dev/null 2>&1; do
+                echo "waiting for $BROKER"; sleep 3
+              done
+              rpk topic create requests.started requests.metered provider.usage settlements drift \
+                --brokers "$BROKER" -p 6 -r 1 || true
+              rpk topic list --brokers "$BROKER"
+{{- end }}

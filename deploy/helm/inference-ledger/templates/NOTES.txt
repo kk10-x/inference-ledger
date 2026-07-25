@@ -1,0 +1,25 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+Components:
+  gateway     {{ if .Values.gateway.autoscaling.enabled }}HPA {{ .Values.gateway.autoscaling.minReplicas }}-{{ .Values.gateway.autoscaling.maxReplicas }}{{ else }}{{ .Values.gateway.replicas }} replica(s){{ end }}, drain grace {{ .Values.gateway.terminationGracePeriodSeconds }}s
+  reconciler  {{ .Values.reconciler.replicas }} replica(s), metrics on :{{ .Values.reconciler.metricsPort }}
+  bundled infra: redpanda={{ .Values.redpanda.enabled }} postgres={{ .Values.postgres.enabled }} redis={{ .Values.redis.enabled }}
+
+Kafka:    {{ include "il.kafkaBootstrap" . }}
+Postgres: {{ .Release.Name }}-postgres:5432
+Redis:    {{ .Release.Name }}-redis:6379
+
+Watch it come up:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ .Release.Name }}-gateway
+
+Reach the gateway (loopback only — it spends a provider API key, never expose it):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-gateway {{ .Values.gateway.port }}:{{ .Values.gateway.port }}
+
+{{- if not .Values.provider.apiKey }}
+{{- if not .Values.provider.existingSecret }}
+
+WARNING: no provider.apiKey was set. The gateway will start but every upstream
+call will 401. Re-install with --set-string provider.apiKey=sk-... or point
+provider.existingSecret at a Secret you manage.
+{{- end }}
+{{- end }}

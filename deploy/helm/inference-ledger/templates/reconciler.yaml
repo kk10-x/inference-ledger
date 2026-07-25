@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-reconciler
+  labels:
+    {{- include "il.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reconciler
+spec:
+  replicas: {{ .Values.reconciler.replicas }}
+  # The consumer group tolerates rolling one member at a time; never run two
+  # generations at once mid-rebalance.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      {{- include "il.selector" . | nindent 6 }}
+      app.kubernetes.io/component: reconciler
+  template:
+    metadata:
+      labels:
+        {{- include "il.selector" . | nindent 8 }}
+        app.kubernetes.io/component: reconciler
+      {{- if .Values.metrics.annotations }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.reconciler.metricsPort | quote }}
+        prometheus.io/path: "/metrics"
+      {{- end }}
+    spec:
+      containers:
+        - name: reconciler
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "inference_ledger.reconciler"]
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.reconciler.metricsPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          env:
+            - name: PROVIDER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "il.providerSecretName" . }}
+                  key: {{ .Values.provider.secretKey }}
+          # The metrics endpoint only serves once the consumer loop is running,
+          # so it doubles as a liveness signal.
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.reconciler.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-reconciler
+  labels:
+    {{- include "il.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reconciler
+spec:
+  selector:
+    {{- include "il.selector" . | nindent 4 }}
+    app.kubernetes.io/component: reconciler
+  ports:
+    - name: metrics
+      port: {{ .Values.reconciler.metricsPort }}
+      targetPort: metrics

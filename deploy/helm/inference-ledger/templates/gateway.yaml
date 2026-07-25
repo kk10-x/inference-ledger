@@ -1,0 +1,90 @@
+{{- if le (int .Values.gateway.terminationGracePeriodSeconds) (int .Values.gateway.shutdown.graceSeconds) }}
+{{- fail "gateway.terminationGracePeriodSeconds must exceed gateway.shutdown.graceSeconds, or a rollout truncates in-flight streams (see docs/shutdown.md)" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "il.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  {{- if not .Values.gateway.autoscaling.enabled }}
+  replicas: {{ .Values.gateway.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "il.selector" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "il.selector" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+      {{- if .Values.metrics.annotations }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.gateway.port | quote }}
+        prometheus.io/path: "/metrics"
+      {{- end }}
+    spec:
+      # The drain must fit inside this window. It has to exceed
+      # gateway.shutdown.graceSeconds; the chart enforces that at render time.
+      terminationGracePeriodSeconds: {{ .Values.gateway.terminationGracePeriodSeconds }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - uvicorn
+            - inference_ledger.gateway.app:app
+            - --host=0.0.0.0
+            - --port={{ .Values.gateway.port }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          env:
+            - name: PROVIDER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "il.providerSecretName" . }}
+                  key: {{ .Values.provider.secretKey }}
+          # Liveness stays true throughout a drain — killing the pod for a failed
+          # liveness probe mid-drain would be a self-inflicted outage.
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          # Readiness flips to 503 the instant SIGTERM lands, so the Service
+          # stops routing new traffic while open streams finish.
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 2
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              # Cover endpoint-propagation lag before the app begins draining, so
+              # no new request is admitted after readiness has flipped.
+              exec:
+                command: ["sh", "-c", "sleep {{ .Values.gateway.preStopSeconds }}"]
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "il.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  selector:
+    {{- include "il.selector" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: {{ .Values.gateway.port }}
+      targetPort: http

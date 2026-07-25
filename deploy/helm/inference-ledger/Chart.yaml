@@ -1,0 +1,17 @@
+apiVersion: v2
+name: inference-ledger
+description: >-
+  OpenAI-compatible inference gateway with dual-ledger token accounting and a
+  Kafka reconciliation loop. The chart deploys the gateway and reconciler, and
+  optionally the backing infrastructure (Redpanda, Postgres, Redis) so a single
+  `helm install` stands the whole system up on kind — or disable it to point at
+  managed services (MSK, RDS, ElastiCache).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - llm
+  - kafka
+  - reconciliation
+  - inference-gateway
+home: https://github.com/kk10-x/inference-ledger

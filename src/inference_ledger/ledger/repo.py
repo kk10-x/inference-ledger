@@ -69,10 +69,28 @@ class PostgresLedger:
     """Production repo. psycopg is imported lazily so the test suite and CI do
     not require a database driver present."""
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, apply_schema: bool = True) -> None:
         from psycopg_pool import ConnectionPool
 
         self._pool = ConnectionPool(dsn, min_size=1, max_size=8, open=True)
+        if apply_schema:
+            self._apply_schema()
+
+    def _apply_schema(self) -> None:
+        """Create the ledger tables if they do not exist.
+
+        The schema is authored once in ``schema.sql`` and applied by the
+        application itself, not by a Postgres-specific init mount. That is the
+        only form that also works against a managed database (RDS has no
+        ``docker-entrypoint-initdb.d``), so the same code path covers local
+        compose, Kubernetes, and cloud. Every statement is ``IF NOT EXISTS``, so
+        applying it on every reconciler start is idempotent and safe.
+        """
+        from pathlib import Path
+
+        schema = (Path(__file__).parent / "schema.sql").read_text()
+        with self._pool.connection() as conn:
+            conn.execute(schema)
 
     def record_pending(self, request_id: str, tenant_id: str, started_at: float) -> None:
         with self._pool.connection() as conn:
