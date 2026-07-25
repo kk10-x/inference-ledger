@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>inference-ledger — dual-ledger LLM token accounting</title>
+<meta name="description" content="An OpenAI-compatible LLM gateway that keeps two independent token ledgers and reconciles them over Kafka, attributing every disagreement to a cause." />
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #12161f; --line: #222836; --ink: #e6edf3;
+    --muted: #8b98a9; --green: #3fb950; --amber: #d29922; --accent: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .mono { font-family: var(--mono); }
+
+  header.hero { padding: 88px 0 56px; border-bottom: 1px solid var(--line); }
+  .kicker {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--green); margin-bottom: 18px;
+  }
+  h1 { font-size: clamp(34px, 5vw, 54px); line-height: 1.08; margin: 0 0 20px; letter-spacing: -.02em; }
+  h1 .mono { color: var(--green); }
+  .lede { font-size: clamp(17px, 2.2vw, 21px); color: var(--muted); max-width: 62ch; margin: 0 0 32px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-block; padding: 11px 20px; border-radius: 8px; font-weight: 600;
+    font-size: 15px; border: 1px solid var(--line);
+  }
+  .btn.primary { background: var(--green); color: #06210d; border-color: var(--green); }
+  .btn.primary:hover { text-decoration: none; filter: brightness(1.08); }
+  .btn.ghost { color: var(--ink); }
+  .btn.ghost:hover { text-decoration: none; border-color: var(--muted); }
+
+  section { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 13px; font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase;
+       color: var(--muted); margin: 0 0 24px; }
+  h3 { font-size: 22px; margin: 0 0 10px; letter-spacing: -.01em; }
+  p.big { font-size: 19px; max-width: 68ch; }
+  .muted { color: var(--muted); }
+
+  figure { margin: 0; }
+  .shot { width: 100%; border: 1px solid var(--line); border-radius: 12px; display: block; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 12px; }
+
+  .grid { display: grid; gap: 16px; }
+  .cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .cols-2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 760px) { .cols-4 { grid-template-columns: repeat(2,1fr); } .cols-2 { grid-template-columns: 1fr; } }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  .tile .num { font-family: var(--mono); font-size: 34px; font-weight: 700; color: var(--green); line-height: 1; }
+  .tile .num.amber { color: var(--amber); }
+  .tile .lbl { color: var(--muted); font-size: 14px; margin-top: 8px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-family: var(--mono); font-size: 12px;
+       text-transform: uppercase; letter-spacing: .05em; }
+  td.mono, .pass { font-family: var(--mono); }
+  .pass { color: var(--green); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-family: var(--mono);
+          font-size: 14px; color: var(--muted); }
+  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; color: var(--ink); }
+  .node.a { border-color: rgba(63,185,80,.5); }
+  .node.b { border-color: rgba(210,153,34,.5); }
+  .arrow { color: var(--muted); }
+
+  ul.clean { list-style: none; padding: 0; margin: 0; }
+  ul.clean li { padding: 8px 0 8px 26px; position: relative; color: var(--muted); }
+  ul.clean li::before { content: "›"; position: absolute; left: 6px; color: var(--green); font-family: var(--mono); }
+  ul.clean li b { color: var(--ink); font-weight: 600; }
+
+  footer { padding: 48px 0 72px; color: var(--muted); font-size: 14px; }
+  .disclaimer { font-size: 13px; color: var(--muted); margin-top: 16px; }
+  code { font-family: var(--mono); background: var(--panel); border: 1px solid var(--line);
+         padding: 1px 6px; border-radius: 5px; font-size: .92em; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker">backend systems · kafka · kubernetes</div>
+    <h1>An LLM gateway that keeps <span class="mono">two</span> token ledgers<br/>and proves they agree.</h1>
+    <p class="lede">
+      Every LLM metering tool trusts a single usage number. That number is wrong in exactly the ways
+      anyone who has worked on payments will recognise — dropped streams, retries, evicted pods,
+      providers that misreport. <b style="color:var(--ink)">inference-ledger</b> counts tokens off the
+      wire <em>and</em> ingests provider-reported usage independently, reconciles the two over Kafka,
+      and attributes every disagreement to a cause.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/kk10-x/inference-ledger">View the code on GitHub →</a>
+      <a class="btn ghost" href="#proof">See the results</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>The live reconciliation dashboard</h2>
+    <figure>
+      <img class="shot" src="dashboard.png" alt="Grafana reconciliation dashboard showing unattributed drift of zero, drift attributed by reason, settlements by status, and gateway latency." />
+      <figcaption>
+        The system under load. The headline panel — <b style="color:var(--green)">unattributed drift: 0</b> —
+        is the invariant that must hold: every token of disagreement between the two ledgers is
+        attributed to a reason (<span class="mono">tokenizer_mismatch</span>,
+        <span class="mono">client_disconnect_partial</span>, <span class="mono">unsettled_timeout</span>).
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="big">Two independently-computed numbers, joined per request on a partitioned log.</p>
+    <div class="flow" style="margin:28px 0;">
+      <span class="node">Client</span><span class="arrow">→</span>
+      <span class="node">Gateway</span><span class="arrow">→</span>
+      <span class="node">Provider</span>
+      <span class="arrow">&nbsp;&nbsp;&nbsp;</span>
+      <span class="node a">Ledger A · metered on the wire</span>
+      <span class="arrow">＼</span>
+      <span class="node b">Ledger B · reported usage</span>
+      <span class="arrow">→</span>
+      <span class="node">Kafka</span><span class="arrow">→</span>
+      <span class="node">Reconciler</span><span class="arrow">→</span>
+      <span class="node">Postgres</span>
+    </div>
+    <div class="grid cols-2">
+      <div>
+        <ul class="clean">
+          <li><b>Exactly-once settlement.</b> Idempotency keys, offset-after-write commits, and an
+            idempotent ledger insert — duplicate delivery and retries cannot double-bill.</li>
+          <li><b>Mid-stream correctness.</b> Client disconnects, budget cuts and pod evictions each
+            produce exactly one attributed ledger entry instead of a hole.</li>
+        </ul>
+      </div>
+      <div>
+        <ul class="clean">
+          <li><b>Graceful drain.</b> On <span class="mono">SIGTERM</span> the gateway drains in-flight
+            SSE streams and flushes Kafka before exiting — verified under real pod eviction on Kubernetes.</li>
+          <li><b>Proven, not asserted.</b> A chaos suite injects broker partitions, kills, duplicate
+            delivery and rebalances, then checks the ledger stayed exact.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="wrap">
+    <h2>The results are measured</h2>
+    <div class="grid cols-4" style="margin-bottom:28px;">
+      <div class="tile"><div class="num">9/9</div><div class="lbl">chaos scenarios passing against a live deployment</div></div>
+      <div class="tile"><div class="num">0</div><div class="lbl">unattributed drift tokens — every disagreement has a cause</div></div>
+      <div class="tile"><div class="num">700</div><div class="lbl">tokens of silent overbilling caught (175 × 4), invisible to single-ledger tools</div></div>
+      <div class="tile"><div class="num">74</div><div class="lbl">unit tests, runnable with no broker via in-process fakes</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Scenario</th><th>Accounted</th><th>Pending</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">gateway-sigkill</td><td>100.00%</td><td>0</td><td class="pass">PASS</td></tr>
+        <tr><td class="mono">gateway-sigterm-drain</td><td>100.00%</td><td>0</td><td class="pass">PASS</td></tr>
+        <tr><td class="mono">broker-partition</td><td>100.00%</td><td>0</td><td class="pass">PASS</td></tr>
+        <tr><td class="mono">duplicate-delivery</td><td>100.00%</td><td>0</td><td class="pass">PASS</td></tr>
+        <tr><td class="mono">provider-usage-skew</td><td>100.00%</td><td>0</td><td class="pass">PASS</td></tr>
+        <tr><td class="mono">reconciler-rebalance</td><td>100.00%</td><td>0</td><td class="pass">PASS</td></tr>
+      </tbody>
+    </table>
+    <p class="disclaimer">
+      The suite was built to produce evidence and instead produced a bug list — an unreachable drift
+      state, a sweeper racing its own consumer, an unretried stale-connection path. Finding those is
+      the point. Full write-up in the <a href="https://github.com/kk10-x/inference-ledger#chaos-results">README</a>.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Two ways to run it</h2>
+    <div class="grid cols-2">
+      <div class="tile">
+        <h3>▶ Demo tier</h3>
+        <p class="muted">Bundled infrastructure (Redpanda, Postgres, Redis) and a mock upstream, so the
+          whole system runs on one small box at <b style="color:var(--ink)">zero cost with no API key</b>.
+          This dashboard is that tier, live.</p>
+        <p class="mono muted" style="font-size:13px;">docker compose … up · helm install on kind</p>
+      </div>
+      <div class="tile">
+        <h3>Production tier</h3>
+        <p class="muted">The same gateway, reconciler and chart, pointed at managed services — a Helm
+          values flip from bundled to <b style="color:var(--ink)">EKS + MSK + RDS</b>, provisioned by
+          Terraform. Everything needed to run it for real ships in the repo.</p>
+        <p class="mono muted" style="font-size:13px;">terraform apply · helm install --set redpanda.enabled=false</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Built by Khrithik S Anand · backend / distributed systems.
+    <a href="https://github.com/kk10-x/inference-ledger">github.com/kk10-x/inference-ledger</a>
+  </div>
+</footer>
+
+</body>
+</html>
