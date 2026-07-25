@@ -208,7 +208,7 @@ than they were; the commit history has the details.
 - [x] Reconciler consumer loop, stateful joiner and sweeper — full loop verified against a live
       Redpanda + Postgres deployment (clean / drift / force-settle all land correctly)
 - [x] Chaos runner and load generator — 9/9 scenarios passing, numbers above
-- [ ] Grafana dashboard screenshot in `assets/` (dashboard is provisioned; image pending)
+- [x] Grafana dashboard, provisioned + captured under live load ([assets/dashboard.png](assets/dashboard.png))
 - [ ] Helm chart, kind setup, graceful-drain verification
 - [ ] Terraform for EKS + MSK Serverless + RDS
 
