@@ -15,6 +15,14 @@ a reason code when they disagree.
 > deploy remain; see [Milestones](#milestones). Nothing in this README claims a result that isn't
 > reproducible from the repo.
 
+![Reconciliation dashboard](assets/dashboard.png)
+
+*Live reconciliation dashboard under load, driven against a mock provider deliberately configured to
+skew its usage reports. The headline panel — **unattributed drift: 0** — is the invariant that must
+hold: every token of disagreement is attributed to a cause (`tokenizer_mismatch` from the injected
+skew, `client_disconnect_partial`, `unsettled_timeout` from the sweeper). The dip is the load
+generator pausing between runs.*
+
 ## Tech stack
 
 - **Gateway** — Python 3.12, FastAPI, httpx (SSE passthrough, no buffering)
