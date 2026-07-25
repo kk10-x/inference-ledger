@@ -30,6 +30,10 @@ spec:
         prometheus.io/path: "/metrics"
       {{- end }}
     spec:
+      {{- if or .Values.postgres.enabled .Values.redpanda.enabled .Values.redis.enabled }}
+      initContainers:
+        {{- include "il.waitInitContainer" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: reconciler
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
