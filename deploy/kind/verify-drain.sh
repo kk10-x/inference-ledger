@@ -13,6 +13,9 @@
 # mock provider enabled.
 set -euo pipefail
 RELEASE=il
+# Unique per run so idempotency keys never collide with a previous run (a
+# collision would resolve as a replay and hide the real before/after delta).
+RUN="drain-$(date +%s)"
 
 echo "==> port-forward gateway"
 kubectl port-forward "svc/${RELEASE}-gateway" 18080:8080 >/tmp/pf-gw.log 2>&1 &
@@ -29,7 +32,7 @@ pids=()
 for i in $(seq 1 60); do
   curl -s -N -m 30 localhost:18080/v1/chat/completions \
     -H 'Content-Type: application/json' \
-    -H "X-Tenant-Id: drain" -H "Idempotency-Key: drain-$i" \
+    -H "X-Tenant-Id: $RUN" -H "Idempotency-Key: $RUN-$i" \
     -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"drain test"}]}' \
     >/dev/null 2>&1 &
   pids+=($!)
@@ -48,9 +51,9 @@ wait "${pids[@]}" 2>/dev/null || true
 sleep 40
 
 after=$(sql "SELECT count(*) FROM settlements")
-pending=$(sql "SELECT count(*) FROM pending_settlements WHERE tenant_id = 'drain'")
-drain_total=$(sql "SELECT count(*) FROM settlements WHERE tenant_id = 'drain'")
-dupes=$(sql "SELECT count(*) FROM settlements WHERE drift_reason = 'retry_double_count'")
+pending=$(sql "SELECT count(*) FROM pending_settlements WHERE tenant_id = '$RUN'")
+drain_total=$(sql "SELECT count(*) FROM settlements WHERE tenant_id = '$RUN'")
+dupes=$(sql "SELECT count(*) FROM settlements WHERE tenant_id = '$RUN' AND drift_reason = 'retry_double_count'")
 
 echo
 echo "settlements before : $before"
