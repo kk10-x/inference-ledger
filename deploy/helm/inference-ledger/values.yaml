@@ -90,6 +90,14 @@ redis:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 128Mi}
 
+# Dev-only in-cluster mock upstream (the chaos suite's fake provider). Enables
+# the whole pipeline to run on kind with no real API key and no spend. When on,
+# it overrides provider.baseUrl. Never enable in a real deployment.
+chaosProvider:
+  enabled: false
+  usageSkew: 0
+  noUsageRate: 0
+
 # Emit prometheus.io/scrape annotations so an in-cluster Prometheus finds the
 # gateway and reconciler without extra ServiceMonitor wiring.
 metrics:

@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "il.labels" . | nindent 4 }}
 data:
-  PROVIDER_BASE_URL: {{ .Values.provider.baseUrl | quote }}
+  PROVIDER_BASE_URL: {{ include "il.providerBaseUrl" . | quote }}
   KAFKA_BOOTSTRAP: {{ include "il.kafkaBootstrap" . | quote }}
   REDIS_URL: {{ include "il.redisUrl" . | quote }}
   POSTGRES_DSN: {{ include "il.postgresDsn" . | quote }}

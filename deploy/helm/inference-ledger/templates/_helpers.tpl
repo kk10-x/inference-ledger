@@ -39,6 +39,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else -}}postgresql://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@{{ .Release.Name }}-postgres:5432/{{ .Values.postgres.database }}{{- end -}}
 {{- end -}}
 
+{{/* Effective provider base URL: the in-cluster mock when the dev provider is
+     on, otherwise the configured real endpoint. */}}
+{{- define "il.providerBaseUrl" -}}
+{{- if .Values.chaosProvider.enabled -}}http://{{ .Release.Name }}-chaos-provider:9000
+{{- else -}}{{ .Values.provider.baseUrl }}{{- end -}}
+{{- end -}}
+
 {{- define "il.providerSecretName" -}}
 {{- if .Values.provider.existingSecret -}}{{ .Values.provider.existingSecret }}
 {{- else -}}{{ .Release.Name }}-provider{{- end -}}
