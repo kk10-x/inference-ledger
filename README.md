@@ -1,5 +1,7 @@
 # inference-ledger
 
+**[▶ Live project page & dashboard](https://kk10-x.github.io/inference-ledger/)**
+
 An OpenAI-compatible LLM gateway that keeps **two independent token ledgers** and proves they agree.
 
 Every LLM metering tool trusts a single usage number. That number is wrong in exactly the ways
