@@ -1,0 +1,12 @@
+# Keep line endings sane across the Windows-authoring / Linux-running split.
+# Shell scripts, YAML and the SQL schema are executed on Linux and must be LF,
+# or bash chokes on \r and Postgres/rpk mis-parse.
+* text=auto eol=lf
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sql text eol=lf
+*.tpl text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
