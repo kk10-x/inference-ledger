@@ -20,6 +20,10 @@ services:
   provider:
     restart: unless-stopped
     environment:
-      CHAOS_USAGE_SKEW: "0"
-      CHAOS_NO_USAGE_RATE: "0.06"
+      # A realistic mix: most requests settle clean, ~15% show a small tokenizer
+      # skew (the signature "silent overbilling" the reconciler attributes), and
+      # a few percent miss their usage block so the sweeper force-settles them.
+      CHAOS_USAGE_SKEW: "3"
+      CHAOS_SKEW_RATE: "0.15"
+      CHAOS_NO_USAGE_RATE: "0.05"
       CHAOS_TRUNCATE_RATE: "0.02"

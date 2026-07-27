@@ -33,7 +33,7 @@
       "options": { "colorMode": "background", "graphMode": "none" },
       "targets": [
         {
-          "expr": "sum(reconciler_drift_tokens_total) - sum(reconciler_drift_tokens_total{reason!=\"\"})",
+          "expr": "(sum(reconciler_drift_tokens_total) - sum(reconciler_drift_tokens_total{reason!=\"\"})) or vector(0)",
           "legendFormat": "unattributed",
           "refId": "A"
         }

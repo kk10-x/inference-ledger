@@ -65,6 +65,11 @@ def _config(body: dict) -> dict:
         "chunks": int(body.get("_chaos_chunks", os.getenv("CHAOS_CHUNKS", "40"))),
         "truncate_rate": float(os.getenv("CHAOS_TRUNCATE_RATE", "0")),
         "usage_skew": int(os.getenv("CHAOS_USAGE_SKEW", "0")),
+        # Fraction of usage-reporting requests to actually skew. Defaults to 1.0
+        # (skew every request — the original all-or-nothing behaviour), so the
+        # chaos suite is unchanged; a demo sets it below 1 for a realistic mix of
+        # clean settlements and attributed drift.
+        "skew_rate": float(os.getenv("CHAOS_SKEW_RATE", "1")),
         "no_usage_rate": float(os.getenv("CHAOS_NO_USAGE_RATE", "0")),
         "chunk_delay_ms": float(os.getenv("CHAOS_CHUNK_DELAY_MS", "8")),
     }
@@ -101,7 +106,8 @@ async def chat_completions(request: Request) -> StreamingResponse:
             # Count what was actually emitted, with the gateway's tokenizer, so
             # a healthy request agrees on both ledgers and any disagreement the
             # suite observes is a real one rather than a units artefact.
-            completion = encode("".join(emitted)) + cfg["usage_skew"]
+            skew = cfg["usage_skew"] if rng.random() < cfg["skew_rate"] else 0
+            completion = encode("".join(emitted)) + skew
             prompt = sum(
                 encode(m.get("content", ""))
                 for m in body.get("messages", [])
