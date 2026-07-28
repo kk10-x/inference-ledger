@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     provider_api_key: str = ""
 
     kafka_bootstrap: str = "localhost:19092"
+    # MSK Serverless accepts IAM auth only. Off for local Redpanda, which is
+    # PLAINTEXT; on for AWS, where credentials come from the pod's IRSA role.
+    kafka_sasl_iam: bool = False
+    aws_region: str = ""
     redis_url: str = "redis://localhost:6379/0"
     postgres_dsn: str = "postgresql://ledger:ledger@localhost:5432/ledger"
 

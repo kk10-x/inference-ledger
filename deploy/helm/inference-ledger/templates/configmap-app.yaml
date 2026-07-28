@@ -7,6 +7,8 @@ metadata:
 data:
   PROVIDER_BASE_URL: {{ include "il.providerBaseUrl" . | quote }}
   KAFKA_BOOTSTRAP: {{ include "il.kafkaBootstrap" . | quote }}
+  KAFKA_SASL_IAM: {{ .Values.kafka.saslIamEnabled | quote }}
+  AWS_REGION: {{ .Values.kafka.awsRegion | quote }}
   REDIS_URL: {{ include "il.redisUrl" . | quote }}
   POSTGRES_DSN: {{ include "il.postgresDsn" . | quote }}
   SETTLEMENT_WINDOW_SECONDS: {{ .Values.reconciliation.settlementWindowSeconds | quote }}

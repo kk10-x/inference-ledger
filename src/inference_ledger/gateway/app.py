@@ -152,7 +152,11 @@ def build_state(settings: Settings) -> GatewayState:
     client = redis.from_url(settings.redis_url, decode_responses=True)
     return GatewayState(
         settings=settings,
-        bus=KafkaBus(settings.kafka_bootstrap),
+        bus=KafkaBus(
+            settings.kafka_bootstrap,
+            sasl_iam=settings.kafka_sasl_iam,
+            region=settings.aws_region,
+        ),
         idempotency=IdempotencyStore(client, settings.idempotency_ttl_seconds),
         budget=TokenBudget(
             client, settings.tenant_budget_tokens, settings.tenant_refill_tokens_per_second

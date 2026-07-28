@@ -25,6 +25,21 @@ endpoints:
   redisUrl: ""         # defaults to the in-chart Redis when empty
   postgresDsn: ""      # defaults to the in-chart Postgres when empty
 
+# Service account the gateway and reconciler run as. Set roleArn to an IRSA role
+# to give pods AWS credentials without mounting a static key — required for MSK
+# Serverless, which accepts IAM auth only.
+serviceAccount:
+  name: inference-ledger
+  roleArn: ""
+
+kafka:
+  # Enable SASL/OAUTHBEARER with AWS MSK IAM tokens. Leave false for a plaintext
+  # broker (local Redpanda, kind); required when endpoints.kafkaBootstrap points
+  # at MSK.
+  saslIamEnabled: false
+  # Region used to sign MSK auth tokens. Defaults to the cluster's region.
+  awsRegion: ""
+
 reconciliation:
   settlementWindowSeconds: 300
   driftToleranceTokens: 0

@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and edit. Never commit the real file — it is
+# gitignored alongside state.
+
+region = "ap-south-1"
+
+# "minimal" — EKS + VPC; Redpanda/Postgres/Redis run in-cluster. ~5x cheaper.
+# "full"    — adds MSK Serverless + RDS + ElastiCache.
+deployment_profile = "minimal"
+
+# Lock the EKS API endpoint to your own address rather than the whole internet.
+# cluster_public_access_cidrs = ["203.0.113.4/32"]
+
+# Production would set these:
+# single_nat_gateway = false
+# rds = {
+#   instance_class    = "db.t4g.small"
+#   allocated_storage = 50
+#   engine_version    = "17.2"
+#   multi_az          = true
+# }

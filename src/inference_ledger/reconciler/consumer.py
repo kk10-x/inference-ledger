@@ -179,7 +179,11 @@ def run(settings: Settings | None = None) -> None:  # pragma: no cover - needs a
     settings = settings or default_settings
     logging.basicConfig(level=logging.INFO)
 
-    bus = KafkaBus(settings.kafka_bootstrap)
+    bus = KafkaBus(
+        settings.kafka_bootstrap,
+        sasl_iam=settings.kafka_sasl_iam,
+        region=settings.aws_region,
+    )
     repo = PostgresLedger(settings.postgres_dsn)
 
     def publish_drift(event: DriftEvent) -> None:
@@ -196,9 +200,15 @@ def run(settings: Settings | None = None) -> None:  # pragma: no cover - needs a
     start_http_server(METRICS_PORT)
     log.info("metrics on :%d", METRICS_PORT)
 
+    from inference_ledger.kafka_auth import client_config
+
     consumer = Consumer(
         {
-            "bootstrap.servers": settings.kafka_bootstrap,
+            **client_config(
+                settings.kafka_bootstrap,
+                sasl_iam=settings.kafka_sasl_iam,
+                region=settings.aws_region,
+            ),
             "group.id": CONSUMER_GROUP,
             "enable.auto.commit": False,  # we commit only after the DB write
             "auto.offset.reset": "earliest",

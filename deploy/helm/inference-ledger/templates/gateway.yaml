@@ -30,6 +30,7 @@ spec:
     spec:
       # The drain must fit inside this window. It has to exceed
       # gateway.shutdown.graceSeconds; the chart enforces that at render time.
+      serviceAccountName: {{ .Values.serviceAccount.name }}
       terminationGracePeriodSeconds: {{ .Values.gateway.terminationGracePeriodSeconds }}
       {{- if or .Values.postgres.enabled .Values.redpanda.enabled .Values.redis.enabled }}
       initContainers:

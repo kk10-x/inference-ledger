@@ -43,12 +43,16 @@ class KafkaBus:
     """Production bus. ``confluent-kafka`` is imported lazily so that developer
     machines and CI can run the test suite without the C extension installed."""
 
-    def __init__(self, bootstrap_servers: str) -> None:
+    def __init__(
+        self, bootstrap_servers: str, *, sasl_iam: bool = False, region: str = ""
+    ) -> None:
         from confluent_kafka import Producer
+
+        from inference_ledger.kafka_auth import client_config
 
         self._producer = Producer(
             {
-                "bootstrap.servers": bootstrap_servers,
+                **client_config(bootstrap_servers, sasl_iam=sasl_iam, region=region),
                 # Durability over latency: this is a billing ledger.
                 "enable.idempotence": True,
                 "acks": "all",
