@@ -28,3 +28,52 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint chart
+        run: helm lint deploy/helm/inference-ledger --set-string provider.apiKey=ci
+      - name: Render both infra modes
+        run: |
+          helm template il deploy/helm/inference-ledger --set-string provider.apiKey=ci > /dev/null
+          helm template il deploy/helm/inference-ledger --set-string provider.apiKey=ci \
+            --set redpanda.enabled=false --set postgres.enabled=false --set redis.enabled=false \
+            --set kafka.saslIamEnabled=true > /dev/null
+      - name: Grace-period guard must reject a too-short window
+        run: |
+          if helm template il deploy/helm/inference-ledger \
+               --set gateway.terminationGracePeriodSeconds=10 \
+               --set gateway.shutdown.graceSeconds=40 >/dev/null 2>&1; then
+            echo "guard did not fire — a rollout could truncate in-flight streams"
+            exit 1
+          fi
+
+  terraform-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.3
+      - name: Format
+        run: terraform fmt -check -recursive
+      - name: Init
+        run: terraform init -backend=false
+      - name: Validate
+        run: terraform validate
+      # Providers are mocked, so this needs no AWS account and creates nothing.
+      - name: Test
+        run: terraform test
+      - name: Security scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: deploy/terraform
+          config_file: deploy/terraform/.checkov.yml
+          quiet: true
+          soft_fail: false

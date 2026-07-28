@@ -41,6 +41,15 @@ resource "aws_db_parameter_group" "this" {
     value = "1000" # statements slower than 1s
   }
 
+  # Reject unencrypted connections outright. psycopg negotiates TLS by default
+  # (sslmode=prefer), so the application needs no change — but an operator
+  # connecting with sslmode=disable now fails loudly instead of quietly sending
+  # billing data in the clear.
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
+
   tags = local.tags
 }
 

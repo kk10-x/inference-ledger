@@ -111,7 +111,7 @@ variable "rds" {
     # Enhanced monitoring and Performance Insights are genuinely useful and
     # genuinely chargeable (CloudWatch metrics, PI storage beyond 7 days).
     # Exposed rather than hardcoded so production turns them on deliberately.
-    enhanced_monitoring = bool
+    enhanced_monitoring  = bool
     performance_insights = bool
   })
   default = {
