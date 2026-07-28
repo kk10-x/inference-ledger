@@ -201,9 +201,31 @@ password to put in a Secret. Pods get short-lived tokens from an IRSA role, sign
 [`kafka_auth.py`](src/inference_ledger/kafka_auth.py); no long-lived AWS credential exists anywhere
 in the deployment.
 
-> **Status: validated, not applied.** `terraform init`, `fmt` and `validate` pass; `apply` has
-> deliberately not been run, so nothing here has been billed for or observed running. The Kubernetes
-> deployment itself *is* verified — on [kind](#kubernetes), using the same chart.
+### The IaC is tested, not just written
+
+`terraform test` runs in CI with **mocked providers** — no AWS account, no credentials, no network —
+so the configuration's own logic is asserted rather than assumed:
+
+```
+tests/profiles.tftest.hcl    minimal creates 0 managed services · full creates exactly 1 of each
+                             a typo'd profile fails the plan · a single AZ is rejected
+tests/security.tftest.hcl    ledger is private, encrypted, backed up ≥7d
+                             Redis never evicts idempotency keys · MSK requires IAM auth
+                             database ingress is security-group scoped, never a CIDR
+Success! 7 passed, 0 failed.
+```
+
+The first assertion is the one that matters most: the entire cost argument rests on `minimal`
+provisioning nothing managed, and the failure mode is silent and expensive. **Checkov** also runs in
+CI (53 passing checks). Findings that were real got fixed — auto minor upgrades, CloudWatch log
+export, query logging, `rds.force_ssl`, IAM database auth, VPC-scoped MSK egress. The handful that
+are deliberate cost trade-offs are variable-driven and carry an inline justification next to the
+resource, rather than being blanket-suppressed.
+
+> **Status: validated and tested, never applied.** `init`, `fmt`, `validate`, `test` and the security
+> scan all pass in CI; `apply` has deliberately not been run, so nothing here has been billed for or
+> observed running. The Kubernetes deployment itself *is* verified — on [kind](#kubernetes), using
+> the same chart.
 
 ## Chaos results
 
@@ -284,8 +306,9 @@ than they were; the commit history has the details.
 - [x] Chaos runner and load generator — 9/9 scenarios passing, numbers above
 - [x] Grafana dashboard, provisioned + captured under live load ([assets/dashboard.png](assets/dashboard.png))
 - [x] Helm chart + kind setup with dependency-gated startup; graceful-drain verified on Kubernetes
-- [x] Terraform for EKS + MSK Serverless + RDS + ElastiCache, with IRSA/MSK IAM auth — validated
-      (`init`/`fmt`/`validate`), not applied
+- [x] Terraform for EKS + MSK Serverless + RDS + ElastiCache, with IRSA/MSK IAM auth
+- [x] IaC quality gates in CI — `terraform test` (7 assertions, mocked providers), Checkov security
+      scan, and a Helm job asserting the grace-period guard fires. Not applied to AWS.
 
 ## Why I built this
 
