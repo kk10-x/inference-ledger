@@ -22,6 +22,28 @@ resource "aws_security_group" "rds" {
   tags = merge(local.tags, { Name = "${var.name}-rds" })
 }
 
+# Query logging. For a billing ledger, a record of schema changes and of any
+# statement slow enough to threaten settlement latency is worth having
+# independently of the application's own logs.
+resource "aws_db_parameter_group" "this" {
+  count = local.managed ? 1 : 0
+
+  name   = var.name
+  family = "postgres17"
+
+  parameter {
+    name  = "log_statement"
+    value = "ddl" # every schema change, without logging each SELECT
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1000" # statements slower than 1s
+  }
+
+  tags = local.tags
+}
+
 resource "aws_db_subnet_group" "this" {
   count = local.managed ? 1 : 0
 
@@ -92,6 +114,7 @@ resource "aws_db_instance" "this" {
   password = random_password.db[0].result
 
   db_subnet_group_name   = aws_db_subnet_group.this[0].name
+  parameter_group_name   = aws_db_parameter_group.this[0].name
   vpc_security_group_ids = [aws_security_group.rds[0].id]
   publicly_accessible    = false
 

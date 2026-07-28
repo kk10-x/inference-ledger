@@ -53,6 +53,12 @@ resource "aws_elasticache_parameter_group" "this" {
 resource "aws_elasticache_cluster" "this" {
   count = local.managed ? 1 : 0
 
+  # Everything in this cache is ephemeral by design: idempotency leases expire
+  # on their own and token buckets refill from elapsed time. Restoring a stale
+  # snapshot would be actively wrong — it would resurrect expired leases and
+  # reinstate outdated balances. There is nothing here worth backing up.
+  #checkov:skip=CKV_AWS_134:cache holds only self-healing ephemeral state; a restore would be incorrect
+
   cluster_id           = var.name
   engine               = "redis"
   engine_version       = var.elasticache.engine_version

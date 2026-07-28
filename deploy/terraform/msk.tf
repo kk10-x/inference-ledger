@@ -25,10 +25,14 @@ resource "aws_security_group" "msk" {
   }
 
   egress {
+    description = "Return traffic within the VPC"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    # Scoped to the VPC rather than 0.0.0.0/0: a managed broker has no reason to
+    # originate traffic to the internet, and an unrestricted egress rule is a
+    # ready-made exfiltration path.
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = merge(local.tags, { Name = "${var.name}-msk" })
