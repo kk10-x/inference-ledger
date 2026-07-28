@@ -1,0 +1,19 @@
+# Checkov configuration.
+#
+# Everything suppressed here is suppressed with a reason. Findings that were
+# real — auto minor upgrades, CloudWatch log export, snapshot tag copying, IAM
+# database auth — were fixed in the code rather than silenced.
+
+framework:
+  - terraform
+
+skip-check:
+  # Registry modules are pinned by semantic version (`~> 5.16`), which is the
+  # documented practice for the Terraform Registry. The check wants a git commit
+  # SHA, which applies to raw git sources and cannot be expressed for a registry
+  # source without abandoning the registry entirely.
+  - CKV_TF_1
+
+# Resource-level exceptions (cost trade-offs that are variable-driven, and one
+# genuine false positive) are inline `#checkov:skip=` comments next to the
+# resource, so the justification lives with the code it excuses.

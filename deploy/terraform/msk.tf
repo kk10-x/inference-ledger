@@ -7,6 +7,11 @@
 resource "aws_security_group" "msk" {
   count = local.managed ? 1 : 0
 
+  # False positive: this group IS attached — to the MSK cluster via its
+  # vpc_config below. The check only recognises attachment to EC2 instances and
+  # ENIs, which a managed service does not expose.
+  #checkov:skip=CKV2_AWS_5:attached to aws_msk_serverless_cluster.this via vpc_config
+
   name        = "${var.name}-msk"
   description = "MSK Serverless access from the EKS node group"
   vpc_id      = module.vpc.vpc_id

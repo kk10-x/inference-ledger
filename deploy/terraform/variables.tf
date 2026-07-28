@@ -101,20 +101,30 @@ variable "single_nat_gateway" {
 # --- Managed services (deployment_profile = "full") ---
 
 variable "rds" {
-  description = "RDS Postgres sizing for the settlement ledger."
+  description = "RDS Postgres sizing and durability for the settlement ledger."
   type = object({
-    instance_class    = string
-    allocated_storage = number
-    engine_version    = string
-    multi_az          = bool
+    instance_class      = string
+    allocated_storage   = number
+    engine_version      = string
+    multi_az            = bool
+    deletion_protection = bool
+    # Enhanced monitoring and Performance Insights are genuinely useful and
+    # genuinely chargeable (CloudWatch metrics, PI storage beyond 7 days).
+    # Exposed rather than hardcoded so production turns them on deliberately.
+    enhanced_monitoring = bool
+    performance_insights = bool
   })
   default = {
     instance_class    = "db.t4g.micro"
     allocated_storage = 20
     engine_version    = "17.2"
-    # Single-AZ by default to halve the cost. The ledger is the system of record
-    # for billing, so production should set this true.
-    multi_az = false
+    # The demo defaults optimise for cost and frictionless teardown. Every one
+    # of these should be inverted for anything holding real billing data — see
+    # the production block in terraform.tfvars.example.
+    multi_az             = false
+    deletion_protection  = false
+    enhanced_monitoring  = false
+    performance_insights = false
   }
 }
 

@@ -41,8 +41,41 @@ resource "random_password" "db" {
   special = false # avoids URL-encoding hazards in the DSN
 }
 
+resource "aws_iam_role" "rds_monitoring" {
+  count = local.managed && var.rds.enhanced_monitoring ? 1 : 0
+
+  name = "${var.name}-rds-monitoring"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "monitoring.rds.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+  count = local.managed && var.rds.enhanced_monitoring ? 1 : 0
+
+  role       = aws_iam_role.rds_monitoring[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
 resource "aws_db_instance" "this" {
   count = local.managed ? 1 : 0
+
+  # Multi-AZ, deletion protection, Performance Insights and enhanced monitoring
+  # are all variable-driven and off by default for a low-cost, easily-destroyed
+  # demo. They are deliberate cost trade-offs, not oversights — production flips
+  # them via the rds variable (see terraform.tfvars.example).
+  #checkov:skip=CKV_AWS_157:multi_az is var-driven; production sets it true
+  #checkov:skip=CKV_AWS_293:deletion_protection is var-driven; production sets it true
+  #checkov:skip=CKV_AWS_353:performance_insights is var-driven and chargeable
+  #checkov:skip=CKV_AWS_118:enhanced_monitoring is var-driven and chargeable
 
   identifier     = var.name
   engine         = "postgres"
@@ -61,19 +94,35 @@ resource "aws_db_instance" "this" {
   db_subnet_group_name   = aws_db_subnet_group.this[0].name
   vpc_security_group_ids = [aws_security_group.rds[0].id]
   publicly_accessible    = false
-  multi_az               = var.rds.multi_az
 
   backup_retention_period = 7
   backup_window           = "03:00-04:00"
   maintenance_window      = "Mon:04:00-Mon:05:00"
+  copy_tags_to_snapshot   = true
 
-  # Demo-friendly defaults. For production: deletion_protection = true and
-  # skip_final_snapshot = false, so a stray `terraform destroy` cannot vaporise
-  # the billing ledger.
-  deletion_protection = false
-  skip_final_snapshot = true
+  # Security patches land without an operator remembering to apply them. Major
+  # versions still require a deliberate upgrade.
+  auto_minor_version_upgrade = true
 
-  performance_insights_enabled = false # chargeable beyond the 7-day free tier
+  # Lets pods authenticate with their IRSA identity instead of the generated
+  # password — the same posture MSK forces, available here as an option.
+  iam_database_authentication_enabled = true
+
+  # Postgres logs to CloudWatch. For a billing ledger, "who changed what" is
+  # worth retaining independently of the database itself.
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+
+  deletion_protection = var.rds.deletion_protection
+  # A final snapshot is skipped only while deletion protection is off, i.e. in
+  # the throwaway demo posture. Turning protection on also preserves the data.
+  skip_final_snapshot       = !var.rds.deletion_protection
+  final_snapshot_identifier = var.rds.deletion_protection ? "${var.name}-final" : null
+
+  multi_az = var.rds.multi_az
+
+  performance_insights_enabled = var.rds.performance_insights
+  monitoring_interval          = var.rds.enhanced_monitoring ? 60 : 0
+  monitoring_role_arn          = var.rds.enhanced_monitoring ? aws_iam_role.rds_monitoring[0].arn : null
 
   tags = local.tags
 }
