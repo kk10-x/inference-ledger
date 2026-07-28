@@ -60,6 +60,7 @@ output "helm_install" {
       --set-string endpoints.postgresDsn='postgresql://${aws_db_instance.this[0].username}:${random_password.db[0].result}@${aws_db_instance.this[0].endpoint}/${aws_db_instance.this[0].db_name}' \
       --set-string endpoints.redisUrl='redis://${aws_elasticache_cluster.this[0].cache_nodes[0].address}:6379/0' \
       --set kafka.saslIamEnabled=true \
+      --set-string kafka.awsRegion='${var.region}' \
       --set-string serviceAccount.roleArn='${module.irsa[0].iam_role_arn}' \
       --set-string provider.apiKey="$PROVIDER_API_KEY"
     EOT

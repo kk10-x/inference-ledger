@@ -14,9 +14,10 @@ a reason code when they disagree.
 > **Status:** the core system is complete and measured. Gateway, reconciler, sweeper and the chaos
 > suite are implemented and tested — 74 unit tests that need no broker, plus
 > [9/9 chaos scenarios](#chaos-results) passing against a live deployment, and a
-> [Helm chart on kind](#kubernetes) with graceful drain verified under pod eviction. The AWS
-> (Terraform) deploy is the last milestone; see [Milestones](#milestones). Nothing in this README
-> claims a result that isn't reproducible from the repo.
+> [Helm chart on kind](#kubernetes) with graceful drain verified under pod eviction. The
+> [AWS Terraform](#aws-terraform) is written and validated but deliberately never applied — that
+> distinction is called out wherever it appears. Nothing in this README claims a result that isn't
+> reproducible from the repo.
 
 ![Reconciliation dashboard](assets/dashboard.png)
 
@@ -176,6 +177,34 @@ PASS: graceful drain settled every in-flight request exactly once
 > The HPA needs a metrics-server to actuate, which bare kind does not ship; the manifest is correct
 > and scales on a real cluster. Everything else above runs as shown on kind.
 
+## AWS (Terraform)
+
+[deploy/terraform](deploy/terraform) provisions the infrastructure the chart's managed-service mode
+expects. A `deployment_profile` switch decides how much AWS runs for you:
+
+| | `minimal` | `full` |
+|---|---|---|
+| EKS + VPC + node group | ✅ | ✅ |
+| Kafka / Postgres / Redis | in-cluster pods | **MSK Serverless / RDS / ElastiCache** |
+| Approx. cost | **~$0.19/hr** | **~$1.00/hr** |
+
+Both are functional — `minimal` is the same gateway and reconciler with the stateful parts
+self-hosted, which is exactly what the chart's bundled-infra toggle is for. The split exists because
+**MSK Serverless alone is ~$0.75/hr** and dominates the bill; proving the system runs on real cloud
+Kubernetes does not require paying for it.
+
+`terraform output helm_install` prints the exact `helm upgrade` for whichever profile was applied,
+so wiring the chart to the infrastructure is copy-paste rather than manual mapping.
+
+The interesting constraint is that **MSK Serverless accepts IAM auth only** — there is no SASL
+password to put in a Secret. Pods get short-lived tokens from an IRSA role, signed by
+[`kafka_auth.py`](src/inference_ledger/kafka_auth.py); no long-lived AWS credential exists anywhere
+in the deployment.
+
+> **Status: validated, not applied.** `terraform init`, `fmt` and `validate` pass; `apply` has
+> deliberately not been run, so nothing here has been billed for or observed running. The Kubernetes
+> deployment itself *is* verified — on [kind](#kubernetes), using the same chart.
+
 ## Chaos results
 
 Nine scenarios, run against a live stack (Redpanda, Postgres, Redis, gateway, reconciler) on a
@@ -255,7 +284,8 @@ than they were; the commit history has the details.
 - [x] Chaos runner and load generator — 9/9 scenarios passing, numbers above
 - [x] Grafana dashboard, provisioned + captured under live load ([assets/dashboard.png](assets/dashboard.png))
 - [x] Helm chart + kind setup with dependency-gated startup; graceful-drain verified on Kubernetes
-- [ ] Terraform for EKS + MSK Serverless + RDS
+- [x] Terraform for EKS + MSK Serverless + RDS + ElastiCache, with IRSA/MSK IAM auth — validated
+      (`init`/`fmt`/`validate`), not applied
 
 ## Why I built this
 

@@ -9,3 +9,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.0
 prometheus-client==0.21.1
 tiktoken==0.8.0
+# Signs SASL/OAUTHBEARER tokens for MSK Serverless, which accepts IAM auth only.
+# Unused (and un-imported) unless KAFKA_SASL_IAM is enabled.
+aws-msk-iam-sasl-signer-python==1.0.2
+
