@@ -118,7 +118,10 @@ run "database_ingress_is_restricted_to_the_cluster" {
   assert {
     condition = alltrue([
       for rule in aws_security_group.rds[0].ingress :
-      length(rule.cidr_blocks) == 0 && length(rule.security_groups) > 0
+      # An omitted attribute is null rather than an empty list, so coalesce
+      # before measuring — length(null) is an error, not zero.
+      length(coalesce(rule.cidr_blocks, [])) == 0 &&
+      length(coalesce(rule.security_groups, [])) > 0
     ])
     error_message = "RDS ingress must be scoped to a security group, never a CIDR block"
   }
@@ -126,7 +129,10 @@ run "database_ingress_is_restricted_to_the_cluster" {
   assert {
     condition = alltrue([
       for rule in aws_security_group.redis[0].ingress :
-      length(rule.cidr_blocks) == 0 && length(rule.security_groups) > 0
+      # An omitted attribute is null rather than an empty list, so coalesce
+      # before measuring — length(null) is an error, not zero.
+      length(coalesce(rule.cidr_blocks, [])) == 0 &&
+      length(coalesce(rule.security_groups, [])) > 0
     ])
     error_message = "Redis ingress must be scoped to a security group, never a CIDR block"
   }
