@@ -1,6 +1,6 @@
 # inference-ledger
 
-**[▶ Live project page](https://kk10-x.github.io/inference-ledger/)** · [live dashboard](https://bella.taile86535.ts.net:10000/d/inference-ledger/inference-ledger-reconciliation?kiosk) (read-only, up when the demo box is)
+**[▶ Live project page](https://kk10-x.github.io/inference-ledger/)** · [live dashboard](https://bella.taile86535.ts.net:10000/grafana/d/inference-ledger/inference-ledger-reconciliation?kiosk) (read-only, up when the demo box is)
 
 An OpenAI-compatible LLM gateway that keeps **two independent token ledgers** and proves they agree.
 
